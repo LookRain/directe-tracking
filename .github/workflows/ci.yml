@@ -16,14 +16,15 @@ jobs:
         run: swift test
 
   python:
-    runs-on: ubuntu-latest
+    # Apple silicon, the versions the fixtures were made with: float32 sums can differ in the last bit on x86
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Dependencies (the tracker needs NumPy and OpenCV only)
-        run: pip install "numpy>=1.26" opencv-python-headless
+        run: pip install "numpy==2.5.4" "opencv-python-headless==4.14.*"
       - name: Tracker selftest
         run: PYTHONPATH=python python -m directe_tracking.tracker
       - name: Swift fixtures match the Python tracker

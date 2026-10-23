@@ -102,7 +102,8 @@ private func resizeLinear(_ src: PixelView, _ dst: PixelView, scaleX: Double, sc
                             // a1 == 0 at the edges: the second tap adds nothing, as in OpenCV
                             let p0 = SIMD4<Int32>(truncatingIfNeeded: s.loadUnaligned(fromByteOffset: o0[dx], as: SIMD4<UInt8>.self))
                             let p1 = SIMD4<Int32>(truncatingIfNeeded: s.loadUnaligned(fromByteOffset: o1[dx], as: SIMD4<UInt8>.self))
-                            buf[dx] = p0 &* al[2 * dx] &+ p1 &* al[2 * dx + 1]
+                            let t0: SIMD4<Int32> = p0 &* al[2 * dx], t1: SIMD4<Int32> = p1 &* al[2 * dx + 1]
+                            buf[dx] = t0 &+ t1
                         }
                     }
                     let lo255 = SIMD4<Int32>(repeating: 0), hi255 = SIMD4<Int32>(repeating: 255)
@@ -126,7 +127,9 @@ private func resizeLinear(_ src: PixelView, _ dst: PixelView, scaleX: Double, sc
                         let d = UnsafeMutableRawPointer(dst.row(dy))
                         for x in 0..<simdPixels {
                             // v_rshr_pack_u<2>(v_mul_hi(v0 >> 4, b0) + v_mul_hi(v1 >> 4, b1))
-                            let v = ((((bufA[x] &>> 4) &* b0) &>> 16) &+ (((bufB[x] &>> 4) &* b1) &>> 16) &+ 2) &>> 2
+                            let va: SIMD4<Int32> = ((bufA[x] &>> 4) &* b0) &>> 16
+                            let vb: SIMD4<Int32> = ((bufB[x] &>> 4) &* b1) &>> 16
+                            let v: SIMD4<Int32> = (va &+ vb &+ 2) &>> 2
                             var o = SIMD4<UInt8>(truncatingIfNeeded: v.clamped(lowerBound: lo255, upperBound: hi255))
                             o[3] = 255
                             d.storeBytes(of: o, toByteOffset: 4 * x, as: SIMD4<UInt8>.self)

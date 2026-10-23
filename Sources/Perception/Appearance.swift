@@ -5,8 +5,17 @@ import TrackerCore
 // Regions come only from confident keypoints; with a body mask, only pixels inside it count.
 
 private let hsvShift = 12
-private let sdivTable: [Int] = (0..<256).map { $0 == 0 ? 0 : Int((Double(255 << hsvShift) / Double($0)).rounded(.toNearestOrEven)) }
-private let hdivTable: [Int] = (0..<256).map { $0 == 0 ? 0 : Int((Double(180 << hsvShift) / (6.0 * Double($0))).rounded(.toNearestOrEven)) }
+// (typed one step at a time: older compilers time out type-checking these as single expressions)
+private let sdivTable: [Int] = (0..<256).map { (i: Int) -> Int in
+    guard i > 0 else { return 0 }
+    let q: Double = Double(255 << hsvShift) / Double(i)
+    return Int(q.rounded(.toNearestOrEven))
+}
+private let hdivTable: [Int] = (0..<256).map { (i: Int) -> Int in
+    guard i > 0 else { return 0 }
+    let q: Double = Double(180 << hsvShift) / (6.0 * Double(i))
+    return Int(q.rounded(.toNearestOrEven))
+}
 
 /// cv2.cvtColor(BGR2HSV) for one 8-bit pixel: H in 0...179, S and V in 0...255.
 @inline(__always) func cvHSV(_ b: Int, _ g: Int, _ r: Int) -> (h: Int, s: Int, v: Int) {
@@ -69,8 +78,9 @@ enum Appearance {
             polys[1] = [torso.map { let p = c + 0.75 * ($0 - c); return SIMD2<Double>(Double(p.x), Double(p.y)) }]
             let along = hipVec / max(norm(hipVec), 1e-6) * Float(0.65 * hipW)
             let across = up * 0.15
-            polys[2] = [[hm - along + across, hm + along + across, hm + along - across, hm - along - across]
-                .map { SIMD2<Double>(Double($0.x), Double($0.y)) }]
+            let back: P = hm - along, front: P = hm + along
+            let quad: [P] = [back + across, front + across, front - across, back - across]
+            polys[2] = [quad.map { SIMD2<Double>(Double($0.x), Double($0.y)) }]
         }
         let headOK = head.filter { ok[$0] }
         if !headOK.isEmpty && length > 6 {
