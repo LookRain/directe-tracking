@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  swift:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Newest Xcode on the runner
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)" && swift --version
+      - name: Test
+        run: swift test
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Dependencies (the tracker needs NumPy and OpenCV only)
+        run: pip install "numpy>=1.26" opencv-python-headless
+      - name: Tracker selftest
+        run: PYTHONPATH=python python -m directe_tracking.tracker
+      - name: Swift fixtures match the Python tracker
+        run: |
+          python tools/golden/tracker_golden.py
+          git diff --exit-code -- Tests/TrackerCoreTests/Fixtures

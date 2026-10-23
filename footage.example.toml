@@ -1,0 +1,15 @@
+# Clip registry: copy to footage.toml (or point $DIRECTE_FOOTAGE at yours). Video files live under
+# $DIRECTE_DATA/footage/raw/<file>.
+#
+# seed:      where the climber is at tag time: [seconds, x, y] with x, y as fractions of the frame.
+# fov_long:  field of view along the frame's long side in degrees (iPhone 1x main ~73.7, 0.5x ~108).
+# handheld:  the camera moved.
+# register:  "tap" (default; an operator taps at `seed`) or "pose" (the climber holds the L pose).
+
+[my_first_climb]
+file = "my_first_climb.mov"
+desc = "Indoor gym, phone on a tripod, one climber, a belayer and people walking past."
+target = "climber in the red top"
+seed = [3.0, 0.52, 0.71]
+fov_long = 73.7
+handheld = false

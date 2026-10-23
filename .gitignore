@@ -1,0 +1,11 @@
+.build/
+.swiftpm/
+__pycache__/
+*.pyc
+.venv/
+data/
+footage.toml
+labels/
+*.mlpackage
+*.mlmodelc
+*.pt
