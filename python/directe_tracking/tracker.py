@@ -261,6 +261,60 @@ class Profile:
         """Something suggests the lock may have been wrong lately: forget what it taught us."""
         self.pending = []
 
+    # -- appearance state: export / import (TrackerCore AppearanceState) --
+
+    def state(self) -> dict:
+        """The target's appearance as plain data to save: colour (tag-time and adapted), re-ID anchor and
+        gallery, the bank of other people. Pending updates aren't part of it."""
+        return {"feat": self.feat.copy(), "valid": self.valid.copy(), "adapt": self.adapt.copy(),
+                "avalid": self.avalid.copy(), "emb": None if self.emb is None else self.emb.copy(),
+                "gallery": [g.copy() for g in self.gallery], "negatives": [e.copy() for e in self.negs],
+                "negative_feats": [f.copy() for f in self.neg_f], "negative_valid": [v.copy() for v in self.neg_v]}
+
+    @classmethod
+    def from_state(cls, st: dict) -> "Profile":
+        p = cls(st["feat"].copy(), st["valid"].copy(), None if st["emb"] is None else st["emb"].copy())
+        p.adapt, p.avalid = st["adapt"].copy(), st["avalid"].copy()
+        p.gallery = [g.copy() for g in st["gallery"]]
+        p.negs = [e.copy() for e in st["negatives"]]
+        p.neg_f = [f.copy() for f in st["negative_feats"]]
+        p.neg_v = [v.copy() for v in st["negative_valid"]]
+        return p
+
+    def reusing(self, prior: "Profile", cfg: Config, prior_colour: float = 0.3) -> "Profile":
+        """This (fresh) profile seeded with an earlier one of the same target (TrackerCore Profile.reusing): the
+        fresh anchor stays; only if the earlier anchor passes for it (cosine >= reid_lo + 0.1) does the earlier
+        one add its gallery views and anchor that pass the same bar (de-duplicated at 0.9, oldest first), its
+        other people that don't pass for the fresh anchor (cosine < reid_lo), and its adapted colour at
+        prior_colour where both saw the region."""
+        anchor, old = self.emb, prior.emb
+        if anchor is None or old is None or len(old) != len(anchor):
+            return self
+        admit = cfg.reid_lo + 0.1
+        if float(old @ anchor) < admit:
+            return self
+        out = Profile.from_state(self.state())
+        views: list = []
+        for e in list(prior.gallery) + [old]:
+            if len(e) != len(anchor) or float(e @ anchor) < admit:
+                continue
+            if any(float(v @ e) > 0.9 for v in views):
+                continue
+            views.append(e.copy())
+        room = max(cfg.gallery_size - len(self.gallery), 0)
+        out.gallery = (views[-room:] if room else []) + [g.copy() for g in self.gallery]
+        for e, f, v in zip(prior.negs, prior.neg_f, prior.neg_v):
+            if len(e) == len(anchor) and float(e @ anchor) < cfg.reid_lo:
+                out.negs.append(e.copy()); out.neg_f.append(f.copy()); out.neg_v.append(v.copy())
+        drop = len(out.negs) - cfg.neg_size
+        if drop > 0:
+            out.negs, out.neg_f, out.neg_v = out.negs[drop:], out.neg_f[drop:], out.neg_v[drop:]
+        w = float(np.clip(prior_colour, 0, 1))
+        for r in range(len(out.avalid)):
+            if out.avalid[r] and prior.avalid[r]:
+                out.adapt[r] = ((1 - w) * out.adapt[r] + w * prior.adapt[r]).astype(out.adapt.dtype)
+        return out
+
 
 def _sim_weighted(profile, pvalid, feats, valids, wmul) -> np.ndarray:
     """appearance.similarity_many with per-region weight multipliers."""
@@ -937,6 +991,27 @@ def selftest() -> None:
     assert not tiein(slid=True, tiein_s=0.0), "test is too easy: without the tie-in phase the lock came back anyway"
     assert tiein(slid=True), "the climber left the ground beside the belayer, but the lock stayed"
     assert tiein(slid=False), "queue: someone else started up beside the climber and took the lock"
+    # Reusing an earlier appearance: it adds what agrees with the fresh tag, and nothing when it doesn't.
+    rng = np.random.default_rng(3)
+    def unit(v):
+        return (v / np.linalg.norm(v)).astype(np.float32)
+    base = unit(rng.normal(size=64))
+    near = lambda k: unit(base + k * unit(rng.normal(size=64)))
+    c = cands([(500, 600)])
+    fresh = Profile(c.feats[0].copy(), c.valids[0].copy(), near(0.2))
+    prior = Profile(c.feats[0].copy(), c.valids[0].copy(), near(0.2))
+    prior.gallery = [near(0.8), near(0.8), unit(rng.normal(size=64))]   # the last: someone else, a polluted view
+    prior.negs = [unit(rng.normal(size=64)), near(0.2)]                 # the last: the climber, banked by mistake
+    prior.neg_f = [c.feats[0].copy()] * 2; prior.neg_v = [c.valids[0].copy()] * 2
+    cfg = Config()
+    r = fresh.reusing(prior, cfg)
+    assert len(r.gallery) == 3 and r.gallery and float(r.gallery[-1] @ prior.emb) > 0.9, "the agreeing views and the old anchor"
+    assert all(float(g @ fresh.emb) >= cfg.reid_lo + 0.1 for g in r.gallery), "a view that doesn't pass for the tap stays out"
+    assert len(r.negs) == 1, "a banked negative that passes for the tapped climber stays out"
+    stranger = Profile(c.feats[0].copy(), c.valids[0].copy(), unit(rng.normal(size=64)))
+    assert not fresh.reusing(stranger, cfg).gallery, "an earlier appearance that disagrees with the tap adds nothing"
+    back = Profile.from_state(r.state())
+    assert len(back.gallery) == len(r.gallery) and len(back.negs) == len(r.negs)
     print("tracker selftest ok")
 
 

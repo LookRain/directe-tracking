@@ -8,9 +8,13 @@ extension TargetTracker {
     /// The tag moment as directe_tracking/online.py runs it (`_start` and the replay of the window): tag the
     /// climber in `window`, start a tracker at the tagged tick, and step every window tick (no camera
     /// calls). Returns the tracker, one step per window tick, and the tagged tick's index.
+    /// `prior`: an earlier appearance of the same target (`AppearanceState`), to start from what it knew as well as
+    /// the tag (`Profile.reusing`); nil, the tag alone.
     public static func start(window: [(t: Double, candidates: [Candidate])], point: SIMD2<Double>, frameHeight: Double,
-                             config: TrackerConfig = TrackerConfig()) throws -> (tracker: TargetTracker, steps: [Step], tagIndex: Int) {
-        let (profile, box, k) = try tag(window: window, point: point, frameHeight: frameHeight)
+                             config: TrackerConfig = TrackerConfig(),
+                             prior: Profile? = nil) throws -> (tracker: TargetTracker, steps: [Step], tagIndex: Int) {
+        var (profile, box, k) = try tag(window: window, point: point, frameHeight: frameHeight)
+        if let prior { profile = profile.reusing(prior, config: config) }
         let trk = TargetTracker(profile: profile, box: box, t: window[k].t, config: config, frameHeight: frameHeight)
         let steps = window.map { trk.step(t: $0.t, view: $0.candidates) }
         return (trk, steps, k)

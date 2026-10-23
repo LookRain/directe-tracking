@@ -263,3 +263,72 @@ public struct Profile: Sendable {
     /// Something suggests the lock may have been wrong lately: forget what it taught us.
     mutating func doubt() { pending = [] }
 }
+
+// MARK: - Appearance state (export / import)
+
+/// A target's appearance, as a value that can be saved and given to a later tracker: the colour signature by body
+/// region (the tag-time one and the adapted copy), the re-ID anchor and gallery, and the bank of people who aren't
+/// the target. Updates still waiting to be committed aren't part of it (they hadn't survived their wait yet).
+public struct AppearanceState: Codable, Sendable, Hashable {
+    /// regions x dim, flat (`AppearanceSpec`).
+    public var feat: [Float]
+    public var valid: [Bool]
+    public var adapt: [Float]
+    public var avalid: [Bool]
+    public var emb: [Float]?
+    public var gallery: [[Float]]
+    public var negatives: [[Float]]
+    public var negativeFeats: [[Float]]
+    public var negativeValid: [[Bool]]
+
+    public init(_ p: Profile) {
+        feat = p.feat; valid = p.valid; adapt = p.adapt; avalid = p.avalid; emb = p.emb
+        gallery = p.gallery; negatives = p.negs; negativeFeats = p.negF; negativeValid = p.negV
+    }
+
+    /// The profile again (no pending updates; the gallery and negative timers start over).
+    public var profile: Profile {
+        var p = Profile(feat: feat, valid: valid, emb: emb)
+        p.adapt = adapt; p.avalid = avalid
+        p.gallery = gallery
+        p.negs = negatives; p.negF = negativeFeats; p.negV = negativeValid
+        return p
+    }
+}
+
+extension Profile {
+    /// This profile (fresh from a tag) seeded with an earlier one of the same target, for tracking again from a
+    /// later moment: the fresh tag stays the anchor (the target may have changed clothes or light), and the earlier
+    /// one adds what it knows that the fresh one agrees with. Only if the earlier anchor passes for the fresh one
+    /// (re-ID cosine at least `reidLo + galleryAdmit`, the gallery's own admission bar) does it add anything:
+    ///  - its gallery views and its anchor that pass the same bar, de-duplicated (`galleryNew`), oldest first, so the
+    ///    fresh tag's views are the newest and last longest;
+    ///  - its bank of other people, except anyone who passes for the fresh anchor (`reidLo` or more);
+    ///  - its adapted colour, blended in at `priorColour` where both saw the region (the fresh one keeps the rest).
+    /// Without re-ID embeddings on both sides, or when they disagree, the fresh profile is returned unchanged.
+    public func reusing(_ prior: Profile, config cfg: TrackerConfig, priorColour: Float = 0.3) -> Profile {
+        guard let anchor = emb, let old = prior.emb, old.count == anchor.count else { return self }
+        let admit = cfg.reidLo + cfg.galleryAdmit
+        guard Double(dot(old[...], anchor)) >= admit else { return self }
+        var out = self
+        var views: [[Float]] = []
+        for e in prior.gallery + [old] where e.count == anchor.count && Double(dot(e[...], anchor)) >= admit {
+            if views.contains(where: { Double(dot($0[...], e)) > cfg.galleryNew }) { continue }
+            views.append(e)
+        }
+        let room = max(cfg.gallerySize - gallery.count, 0)
+        out.gallery = Array(views.suffix(room)) + gallery
+        for i in prior.negs.indices where prior.negs[i].count == anchor.count && Double(dot(prior.negs[i][...], anchor)) < cfg.reidLo {
+            out.negs.append(prior.negs[i]); out.negF.append(prior.negF[i]); out.negV.append(prior.negV[i])
+        }
+        if out.negs.count > cfg.negSize {
+            let drop = out.negs.count - cfg.negSize
+            out.negs.removeFirst(drop); out.negF.removeFirst(drop); out.negV.removeFirst(drop)
+        }
+        let w = min(max(priorColour, 0), 1)
+        for r in 0..<Cands.R where out.avalid[r] && prior.avalid[r] {
+            for k in r * Cands.D ..< (r + 1) * Cands.D { out.adapt[k] = (1 - w) * out.adapt[k] + w * prior.adapt[k] }
+        }
+        return out
+    }
+}

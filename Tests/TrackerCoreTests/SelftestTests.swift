@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import TrackerCore
 
@@ -119,4 +120,36 @@ private func tieinEndsOnClimber(slid: Bool, tieinS: Double = 60) -> (Bool, [Trac
     #expect(back, "the climber left the ground beside the belayer, but the lock stayed")
     #expect(events.map(\.kind) == ["ascent swap"])
     #expect(tieinEndsOnClimber(slid: false).0, "queue: someone else started up beside the climber and took the lock")
+}
+
+// Reusing an earlier appearance (as the Python selftest's last scene): it adds what agrees with the fresh tag, leaves
+// out views and negatives that disagree with it, and nothing at all when the anchors disagree.
+@Test func reusingAnEarlierAppearance() throws {
+    var seed: UInt64 = 3
+    func random() -> Float {  // a small LCG: the scene, not the Python one's numbers
+        seed = seed &* 6364136223846793005 &+ 1442695040888963407
+        return Float(Double(seed >> 11) / Double(1 << 53)) * 2 - 1
+    }
+    func unit(_ v: [Float]) -> [Float] { let n = v.map { $0 * $0 }.reduce(0, +).squareRoot(); return v.map { $0 / n } }
+    func noise() -> [Float] { unit((0..<64).map { _ in random() }) }
+    let base = noise()
+    func near(_ k: Float) -> [Float] { unit(zip(base, noise()).map { $0 + k * $1 }) }
+    func cos(_ a: [Float], _ b: [Float]) -> Float { zip(a, b).map(*).reduce(0, +) }
+    let c = cands([(500, 600)])[0]
+    let fresh = Profile(feats: c.feats, valid: c.valids, emb: near(0.2))
+    var prior = Profile(feats: c.feats, valid: c.valids, emb: near(0.2))
+    prior.gallery = [near(0.8), near(0.8), noise()]  // the last: someone else, a polluted view
+    prior.negs = [noise(), near(0.2)]                // the last: the climber, banked by mistake
+    prior.negF = [c.feats.flatMap { $0 }, c.feats.flatMap { $0 }]
+    prior.negV = [c.valids, c.valids]
+    let cfg = TrackerConfig()
+    let r = fresh.reusing(prior, config: cfg)
+    #expect(r.gallery.count == 3 && cos(r.gallery.last!, prior.emb!) > 0.99, "the agreeing views, then the old anchor")
+    #expect(r.gallery.allSatisfy { Double(cos($0, fresh.emb!)) >= cfg.reidLo + cfg.galleryAdmit })
+    #expect(r.negs.count == 1, "a banked negative that passes for the tapped climber stays out")
+    #expect(r.emb == fresh.emb && r.feat == fresh.feat, "the tap stays the anchor")
+    let stranger = Profile(feats: c.feats, valid: c.valids, emb: noise())
+    #expect(fresh.reusing(stranger, config: cfg).gallery.isEmpty, "an earlier appearance that disagrees adds nothing")
+    let back = try JSONDecoder().decode(AppearanceState.self, from: JSONEncoder().encode(AppearanceState(r))).profile
+    #expect(back.gallery == r.gallery && back.negs == r.negs && back.adapt == r.adapt)
 }
