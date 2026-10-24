@@ -4,8 +4,8 @@ import Testing
 
 // Golden replay of the lab tracker (tools/ios_golden/tracker_golden.py): tag() on the tag window,
 // then camera -> predictedBox -> [referee actions] -> step per tick, on cached FULL detections of
-// four real segments (four configs each) and on eleven synthetic scenes for the rare paths (four
-// configs each). The fixture inputs are exact (float32 boxes, float16 features and embeddings), so
+// four real segments (four configs each) and on twelve synthetic scenes for the rare paths (four
+// configs each, six for the stacked look-alike). The fixture inputs are exact (float32 boxes, float16 features and embeddings), so
 // the port must reproduce the lab: the same state, chosen candidate, source, flags and profile sizes
 // every tick, boxes within 1e-3 px. Measured: bit-exact, every number on every tick.
 

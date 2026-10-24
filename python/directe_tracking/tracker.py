@@ -55,6 +55,16 @@ class Config:
     settle_s: float = 0.5          # seen this long as a separate person = someone else
     others_always: bool = False    # ...and someone else can't take the lock even when their box touches
     unstable_shift: float = 1.0    # camera moved this many body heights in a frame: freeze identity
+    # Two people stay two people. Look-alikes on neighbouring routes, seen from a steep side or from below, stack
+    # up with touching boxes and the same look; the jump guard only judges gaps, so a score wobble carried the
+    # lock across, and a climber the detector missed for a frame handed it to the person below (synthetic gym
+    # seed 1, side_steep; IMG_4826 at 488 s). Someone else - seen beside the locked climber for settle_s, or
+    # anyone in view while the track the lock has held for settle_s is - may take the lock, touching or not,
+    # only by beating the climber's own track by switch_margin, and not while that track is unseen or ruled
+    # out. People the detector misses stay remembered for track_keep_s, so a dropped detection doesn't make
+    # them strangers.
+    switch_margin: float = 0.1     # score; < 0: off
+    track_keep_s: float = 1.0      # remember someone the detector missed this long (0: last frame only)
     # Ground rule made independent of the lock being right (docs/review/deep-dives/ascent-and-ground.md):
     # "the climber is up" holds through a loss and is released only by following them down; the
     # ground line moves with the camera; tagged mid-wall, someone standing beside the tag gives the ground.
@@ -375,6 +385,10 @@ class TargetTracker:
         self.jump_t = -1e9                      # last time the jump guard refused a move
         self.fall_t = -1e9                      # last time the climber moved down fast
         self._tracks = (np.zeros((0, 4)), np.zeros(0), np.zeros(0, bool))  # last frame: boxes, age (s), is the target
+        self._beside = np.zeros(0)  # ...and how long each was seen beside the locked climber (s)
+        self._own_held = 0.0        # how long the lock has been locked on the track it follows now (s)
+        # people the detector missed lately: box, age, target, time beside the climber, time unseen (s)
+        self._kept = (np.zeros((0, 4)), np.zeros(0), np.zeros(0, bool), np.zeros(0), np.zeros(0))
         if self.cfg.ground_latch and frame_h is not None and box[3] >= frame_h - 3:
             self.ground = float(frame_h)        # feet below the frame: the ground is at least the bottom edge
         self.frame_h = frame_h
@@ -399,6 +413,7 @@ class TargetTracker:
         b, a, tg = self._tracks
         if len(b):
             self._tracks = (b + np.tile(shift, 2), a, tg)
+        self._shift_kept(shift)
         if self.cfg.ground_latch:
             self.ground += float(shift[1])      # the ground line moves with the wall, so the
             self.ground_tag += float(shift[1])  # rule works on a gimbal or in the hand too
@@ -498,6 +513,7 @@ class TargetTracker:
                 self.c = self.c + T
                 b, a, tg = self._tracks
                 self._tracks = (b + np.tile(T, 2), a, tg)
+                self._shift_kept(T)
         pred = self.c + self.v * dt
         self.t = t
         since = t - self.t_seen
@@ -522,27 +538,77 @@ class TargetTracker:
         self._carry(c, dt, s.chosen if s is not None else -1)
         return s if s is not None else self._miss(pred, since)
 
-    def _track_info(self, c: Cands) -> tuple[np.ndarray, np.ndarray]:
-        """Per candidate: how long it has been seen (s, by IoU with last frame) and whether that
-        track is the one the lock has been following."""
+    def _track_info(self, c: Cands, beside: bool = False):
+        """Per candidate: how long it has been seen (s, by IoU with last frame, else with someone
+        the detector missed lately) and whether that track is the one the lock has been following;
+        with `beside`, also how long it was seen beside the locked climber (s)."""
         b, a, tg = self._tracks
-        age, is_t = np.zeros(len(c)), np.zeros(len(c), bool)
-        if len(b):
-            for i, box in enumerate(c.boxes):
-                ov = iou(box, b)
+        kb, ka, kt, kn, _ = self._kept
+        age, is_t, bes = np.zeros(len(c)), np.zeros(len(c), bool), np.zeros(len(c))
+        for i, box in enumerate(c.boxes):
+            ov = iou(box, b) if len(b) else np.zeros(0)
+            j = int(np.argmax(ov)) if len(ov) else -1
+            if j >= 0 and ov[j] > 0.3:
+                age[i], is_t[i], bes[i] = a[j], tg[j], self._beside[j]
+            elif len(kb):
+                ov = iou(box, kb)
                 j = int(np.argmax(ov))
                 if ov[j] > 0.3:
-                    age[i], is_t[i] = a[j], tg[j]
-        return age, is_t
+                    age[i], is_t[i], bes[i] = ka[j], kt[j], kn[j]
+        return (age, is_t, bes) if beside else (age, is_t)
 
     def _carry(self, c: Cands, dt: float, chosen: int) -> None:
-        age, is_t = self._track_info(c)
+        age, is_t, bes = self._track_info(c, beside=True)
+        sep = self.cfg.switch_margin >= 0
         if len(c):
             age = age + dt
             if chosen >= 0:
+                self._own_held = self._own_held + dt if is_t[chosen] else 0.0  # 0: it moved onto another track
                 is_t = np.zeros(len(c), bool)
                 is_t[chosen] = True
+                if sep:
+                    is_t |= same_person(c.boxes[chosen], c.boxes)  # a second box of the climber is on their track
+                    bes = bes + dt * ~is_t                          # everyone else was seen beside them
+        if sep and self.cfg.track_keep_s > 0:
+            self._keep(c, dt, chosen)
         self._tracks = (c.boxes.copy() if len(c) else np.zeros((0, 4)), age, is_t)
+        self._beside = bes if sep else np.zeros(len(c))
+
+    def _keep(self, c: Cands, dt: float, chosen: int) -> None:
+        """Last frame's people and those missed lately whom nobody in this frame overlaps stay
+        remembered for track_keep_s (box, age, target, time beside the climber; not moved)."""
+        b, a, tg = self._tracks
+        kb, ka, kt, kn, ku = self._kept
+        B = np.concatenate([b.reshape(-1, 4), kb.reshape(-1, 4)])
+        A, T = np.concatenate([a, ka]) + dt, np.concatenate([tg, kt])
+        N, U = np.concatenate([self._beside, kn]), np.concatenate([np.zeros(len(b)), ku]) + dt
+        gone = np.array([not len(c) or iou(x, c.boxes).max() <= 0.3 for x in B], bool).reshape(len(B))
+        keep = gone & (U <= self.cfg.track_keep_s)
+        if chosen >= 0:
+            T = np.zeros(len(B), bool)  # the lock is on someone in this frame: theirs is the climber's track
+        self._kept = (B[keep], A[keep], T[keep], N[keep], U[keep])
+
+    def _shift_kept(self, shift: np.ndarray) -> None:
+        kb, ka, kt, kn, ku = self._kept
+        if len(kb):
+            self._kept = (kb + np.tile(shift, 2), ka, kt, kn, ku)
+
+    def _switches(self, c: Cands, score: np.ndarray, ok: np.ndarray, seen: np.ndarray) -> np.ndarray:
+        """Who may not take the lock as someone else (Config.switch_margin): whoever was seen beside
+        the locked climber for settle_s, and, while the track the lock has been locked on for settle_s
+        is in view (`seen`: not ruled out), everyone else in view. Someone else may take the lock only
+        by beating the best acceptable candidate on the climber's track by switch_margin, and not at
+        all while there is none."""
+        _, is_t, bes = self._track_info(c, beside=True)
+        own = is_t & seen
+        held = own.any() and self._own_held >= self.cfg.settle_s
+        other = ~is_t & (held | (bes >= self.cfg.settle_s))
+        for k in np.where(own)[0]:  # another box of the climber isn't someone else
+            other &= ~same_person(c.boxes[k], c.boxes)
+        best = ok & own
+        if not other.any() or not best.any():
+            return other
+        return other & (score < score[best].max() + self.cfg.switch_margin)
 
     def _jumps(self, pred, since, dt, c: Cands, cents, h_ref) -> np.ndarray:
         """Candidates the lock may not move to (see Config.jump_guard)."""
@@ -592,6 +658,8 @@ class TargetTracker:
             ok = known & (app >= floor) & (motion >= 0.05) & ~bad
             if ok.any() and jump[int(np.argmax(np.where(ok, score, -1)))] and score[ok].max() >= cfg.accept:
                 self.jump_t = self.t  # the guard overruled the tracker's pick: worth asking the referee
+            if cfg.switch_margin >= 0:  # (not a jump: no doubt, no referee; a look-alike beside the climber
+                jump |= self._switches(c, score, ok & ~jump, ~bad)  # would make every frame one)
             bad |= jump
         score[~known | (app < floor) | (motion < 0.05) | bad] = 0.0
         if score.max() < cfg.accept:
@@ -642,6 +710,9 @@ class TargetTracker:
         if len(b) and iou(box, b).max() > 0.3:
             tg[int(np.argmax(iou(box, b)))] = True
         self._tracks = (b, a, tg)
+        kb, ka, _, kn, ku = self._kept
+        self._kept = (kb, ka, np.zeros(len(kb), bool), kn, ku)
+        self._own_held = 0.0
 
     def release(self, t: float) -> None:
         """Referee: whoever we're locked onto is not the climber. Drop the lock."""
@@ -904,7 +975,8 @@ def tag(dets, seed: tuple[float, float, float], seconds: float = 1.5, max_second
 def selftest() -> None:
     """Jump guard on synthetic scenes where everyone looks identical, so only geometry decides:
     a long fall at 10 and 5 fps must be followed; a lookalike next to an occluded climber must
-    not take the lock; a camera bump must not, whether or not the shift is known."""
+    not take the lock; a camera bump must not, whether or not the shift is known; nor a look-alike
+    stacked right below the climber (switch_margin)."""
     H = 200.0  # body height, px
 
     def cands(centres) -> Cands:
@@ -988,6 +1060,32 @@ def selftest() -> None:
             s = trk.step(t, people(pts, cols))
         return on(s, *a)
 
+    def stacked(cfg, gaps: bool) -> bool:
+        """A look-alike climbs a body length below on the next route, seen steeply from the side: the boxes
+        overlap. With `gaps` the detector misses the look-alike for a frame, then the climber for 0.4 s;
+        without, the climber's colour reads wrong for a frame (torso and legs). True if the lock ever moved
+        onto the look-alike."""
+        trk = tracker(cfg)
+        for k in range(1, 50):
+            t = k * 0.1
+            y = 600 - 0.25 * H * t
+            ps = [] if gaps and 2.0 <= t < 2.4 else [(500, y)]
+            ps += [] if gaps and abs(t - 1.9) < 1e-6 else [(540, y + 0.8 * H)]
+            c = cands(ps)
+            if not gaps and abs(t - 3.0) < 1e-6:
+                c.feats[0, 1:] = 0.0
+                c.feats[0, 1:, 3] = 1.0
+            s = trk.step(t, c)
+            if on(s, 540, y + 0.8 * H):
+                return True
+        assert on(s, 500, y), f"didn't keep the climber: {s.state} {s.box}"
+        return False
+
+    off = Config(switch_margin=-1.0, track_keep_s=0.0)
+    assert stacked(off, True) and stacked(off, False), "test is too easy: the look-alike never took the lock"
+    assert stacked(Config(track_keep_s=0.0), True), "test is too easy: without remembering missed people it held anyway"
+    assert not stacked(Config(), True), "a look-alike stacked below took the lock while the climber was missed"
+    assert not stacked(Config(), False), "a look-alike stacked below took the lock when the climber's colour wobbled"
     assert not tiein(slid=True, tiein_s=0.0), "test is too easy: without the tie-in phase the lock came back anyway"
     assert tiein(slid=True), "the climber left the ground beside the belayer, but the lock stayed"
     assert tiein(slid=False), "queue: someone else started up beside the climber and took the lock"

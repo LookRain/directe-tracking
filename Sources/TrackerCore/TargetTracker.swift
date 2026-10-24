@@ -82,6 +82,9 @@ public final class TargetTracker {
     var trustUntil = -1e9
     var fallT = -1e9
     var tracks = Tracks()
+    var kept = Kept()
+    /// How long the lock has been locked on the track it follows now (s).
+    var ownHeld = 0.0
     var tTag: Double
     var groundTag: Double
     let tagProfile: Profile
@@ -93,12 +96,24 @@ public final class TargetTracker {
     var jumpedSinceUp = false
     var prev: (state: TrackState, box: Box)?
 
-    /// Last frame's boxes (as the lab's `_tracks`): age (s) and whether that track is the target.
+    /// Last frame's boxes (as the lab's `_tracks`): age (s), whether that track is the target, and how long it
+    /// was seen beside the locked climber (s; the lab's `_beside`).
     struct Tracks {
         var boxes: [Box] = []
         var f32 = false
         var age: [Double] = []
         var isT: [Bool] = []
+        var beside: [Double] = []
+    }
+
+    /// People the detector missed lately (the lab's `_kept`): as `Tracks` (boxes always float64), plus how long
+    /// each has been unseen (s).
+    struct Kept {
+        var boxes: [Box] = []
+        var age: [Double] = []
+        var isT: [Bool] = []
+        var beside: [Double] = []
+        var unseen: [Double] = []
     }
 
     /// Short-lived IoU track of anyone (tie-in phase and the tagged-on-the-wall check).
@@ -146,6 +161,7 @@ public final class TargetTracker {
             tracks.boxes = tracks.boxes.map { $0.offset(shift) }
             tracks.f32 = false
         }
+        kept.boxes = kept.boxes.map { $0.offset(shift) }
         if config.groundLatch {
             ground += shift.y  // the ground line moves with the wall
             groundTag += shift.y
@@ -266,6 +282,7 @@ public final class TargetTracker {
             @inline(__always) func r(_ x: Double) -> Double { p ? f32(x) : x }
             tracks.boxes = tracks.boxes.map { Box(r($0.x0 + T.v.x), r($0.y0 + T.v.y), r($0.x1 + T.v.x), r($0.y1 + T.v.y)) }
             tracks.f32 = p
+            kept.boxes = kept.boxes.map { $0.offset(T.v) }  // float64 + the shift: float64
         }
         let pred = c + v * dt
         self.t = t
@@ -299,33 +316,93 @@ public final class TargetTracker {
         return s ?? miss(pred, since)
     }
 
-    /// Per candidate: how long it has been seen (s, by IoU with last frame) and whether that track is
-    /// the one the lock has been following.
-    func trackInfo(_ cc: Cands) -> (age: [Double], isT: [Bool]) {
+    /// Per candidate: how long it has been seen (s, by IoU with last frame, else with someone the detector missed
+    /// lately), whether that track is the one the lock has been following, and how long it was seen beside the
+    /// locked climber (s).
+    func trackInfo(_ cc: Cands) -> (age: [Double], isT: [Bool], beside: [Double]) {
         var age = [Double](repeating: 0, count: cc.count), isT = [Bool](repeating: false, count: cc.count)
-        if !tracks.boxes.isEmpty {
-            for (i, box) in cc.boxes.enumerated() {
+        var beside = [Double](repeating: 0, count: cc.count)
+        for (i, box) in cc.boxes.enumerated() {
+            if !tracks.boxes.isEmpty {
                 let ov = npIoU(box, true, tracks.boxes, tracks.f32)
                 let j = argmax(ov.v)
                 if gt(ov.v[j], 0.3, f32: ov.f32) {
                     age[i] = tracks.age[j]
                     isT[i] = tracks.isT[j]
+                    beside[i] = tracks.beside[j]
+                    continue
+                }
+            }
+            if !kept.boxes.isEmpty {
+                let ov = npIoU(box, true, kept.boxes, false)
+                let j = argmax(ov.v)
+                if ov.v[j] > 0.3 {
+                    age[i] = kept.age[j]
+                    isT[i] = kept.isT[j]
+                    beside[i] = kept.beside[j]
                 }
             }
         }
-        return (age, isT)
+        return (age, isT, beside)
     }
 
     func carry(_ cc: Cands, _ dt: Double, _ chosen: Int) {
-        var (age, isT) = trackInfo(cc)
+        var (age, isT, beside) = trackInfo(cc)
+        let sep = config.switchMargin >= 0
         if cc.count > 0 {
             age = age.map { $0 + dt }
             if chosen >= 0 {
+                ownHeld = isT[chosen] ? ownHeld + dt : 0  // 0: it moved onto another track
                 isT = [Bool](repeating: false, count: cc.count)
                 isT[chosen] = true
+                if sep {
+                    let same = npSamePerson32(cc.boxes[chosen], cc.boxes, 0.5)  // a second box of the climber
+                    for i in 0..<cc.count {
+                        if same[i] { isT[i] = true } else { beside[i] += dt }    // everyone else was beside them
+                    }
+                }
             }
         }
-        tracks = Tracks(boxes: cc.boxes, f32: cc.count > 0, age: age, isT: isT)
+        if sep && config.trackKeepS > 0 { keep(cc, dt, chosen) }
+        tracks = Tracks(boxes: cc.boxes, f32: cc.count > 0, age: age, isT: isT,
+                        beside: sep ? beside : [Double](repeating: 0, count: cc.count))
+    }
+
+    /// Last frame's people and those missed lately whom nobody in this frame overlaps stay remembered for
+    /// `trackKeepS` (box, age, target, time beside the climber; not moved).
+    func keep(_ cc: Cands, _ dt: Double, _ chosen: Int) {
+        let boxes = tracks.boxes + kept.boxes
+        let age = (tracks.age + kept.age).map { $0 + dt }
+        let isT = chosen >= 0 ? [Bool](repeating: false, count: boxes.count) : tracks.isT + kept.isT
+        let beside = tracks.beside + kept.beside
+        let unseen = [Double](repeating: dt, count: tracks.boxes.count) + kept.unseen.map { $0 + dt }
+        var next = Kept()
+        for i in boxes.indices where unseen[i] <= config.trackKeepS {
+            if cc.count > 0 && npIoU(boxes[i], false, cc.boxes, true).v.max()! > 0.3 { continue }  // seen again
+            next.boxes.append(boxes[i]); next.age.append(age[i]); next.isT.append(isT[i])
+            next.beside.append(beside[i]); next.unseen.append(unseen[i])
+        }
+        kept = next
+    }
+
+    /// Who may not take the lock as someone else (TrackerConfig.switchMargin): whoever was seen beside the locked
+    /// climber for `settleS`, and, while the track the lock has been locked on for `settleS` is in view (`seen`: not
+    /// ruled out), everyone else in view. Someone else may take the lock only by beating the best acceptable
+    /// candidate on the climber's track by `switchMargin`, and not at all while there is none.
+    func switches(_ cc: Cands, _ score: [Double], _ ok: [Bool], _ seen: [Bool]) -> [Bool] {
+        let n = cc.count
+        let (_, isT, beside) = trackInfo(cc)
+        let own = (0..<n).map { isT[$0] && seen[$0] }
+        let held = own.contains(true) && ownHeld >= config.settleS
+        var other = (0..<n).map { !isT[$0] && (held || beside[$0] >= config.settleS) }
+        for k in 0..<n where own[k] {  // another box of the climber isn't someone else
+            let same = npSamePerson32(cc.boxes[k], cc.boxes, 0.5)
+            for i in 0..<n where same[i] { other[i] = false }
+        }
+        guard other.contains(true), let best = (0..<n).filter({ ok[$0] && own[$0] }).map({ score[$0] }).max() else {
+            return other
+        }
+        return (0..<n).map { other[$0] && score[$0] < best + config.switchMargin }
     }
 
     /// Candidates the lock may not move to (see TrackerConfig.jumpGuard).
@@ -345,7 +422,7 @@ public final class TargetTracker {
         let reach = cfg.moveRate * el + cfg.jumpMargin
         let vDown = max(v.y, 0.0) / hRef
         let fallReach = reach + vDown * el + 0.5 * cfg.fallAccel * (el * el)
-        let (age, isT) = trackInfo(cc)
+        let (age, isT, _) = trackInfo(cc)
         return cc.boxes.indices.map { i in
             let dx = (cents[i].x - pred.x) / hRef, dy = (cents[i].y - pred.y) / hRef
             let falling = dy > 0 && gap[i] <= fallReach && abs(dx) <= reach + 0.5 * dy
@@ -392,7 +469,7 @@ public final class TargetTracker {
         let vetoes = vetoed(n)
         var bad = implausible(cc, hs, hRef, hRefWeak).enumerated().map { $1 || vetoes[$0] }
         if cfg.jumpGuard {
-            let jump = jumps(pred, since, dt, cc, cents, hRef)
+            var jump = jumps(pred, since, dt, cc, cents, hRef)
             let ok = (0..<n).map { known[$0] && app.ge($0, floor) && motion[$0] >= 0.05 && !bad[$0] }
             if ok.contains(true) {
                 let pick = argmax((0..<n).map { ok[$0] ? score[$0] : -1 })
@@ -400,6 +477,10 @@ public final class TargetTracker {
                 if jump[pick] && okMax >= cfg.accept {
                     jumpT = t  // the guard overruled the tracker's pick: worth asking the referee
                 }
+            }
+            if cfg.switchMargin >= 0 {  // (not a jump: no doubt, no referee; a look-alike beside the climber would
+                let sw = switches(cc, score, (0..<n).map { ok[$0] && !jump[$0] }, bad.map { !$0 })  // make every frame one)
+                for i in 0..<n where sw[i] { jump[i] = true }
             }
             for i in 0..<n where jump[i] { bad[i] = true }
         }
@@ -455,6 +536,8 @@ public final class TargetTracker {
             if gt(ov.v.max()!, 0.3, f32: ov.f32) { tg[argmax(ov.v)] = true }
         }
         tracks.isT = tg
+        kept.isT = [Bool](repeating: false, count: kept.boxes.count)
+        ownHeld = 0
     }
 
     /// Referee: whoever we're locked onto is not the climber. Drop the lock.

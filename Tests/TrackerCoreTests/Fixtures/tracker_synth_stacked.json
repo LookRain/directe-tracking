@@ -1,0 +1,1111 @@
+{
+ "name": "synth_stacked",
+ "kind": "synthetic",
+ "width": 1920,
+ "height": 2160,
+ "window_ticks": 1,
+ "spotter": false,
+ "trust_s": 0.0,
+ "desc": "a look-alike a body length below on the next route (steep side view, boxes overlap): missed detections, colour and re-ID wobbles, a second box of the climber",
+ "configs": [
+  {
+   "name": "default",
+   "config": {
+    "app_min": 0.5,
+    "app_rel": 0.75,
+    "accept": 0.55,
+    "reacquire_app": 0.75,
+    "reacquire_frames": 3,
+    "uncertain_s": 2.0,
+    "adapt_rate": 0.03,
+    "adapt_app": 0.7,
+    "use_colour": true,
+    "use_reid": true,
+    "colour_weight": 0.2,
+    "reid_mode": "blend",
+    "reid_lo": 0.35,
+    "reid_hi": 0.75,
+    "gallery_size": 30,
+    "gallery_every_s": 1.0,
+    "max_sigma": 3.0,
+    "ground_rule": true,
+    "max_size_ratio": 2.5,
+    "jump_guard": true,
+    "move_rate": 1.5,
+    "fall_accel": 11.5,
+    "jump_margin": 0.1,
+    "settle_s": 0.5,
+    "others_always": false,
+    "unstable_shift": 1.0,
+    "switch_margin": 0.1,
+    "track_keep_s": 1.0,
+    "ground_latch": false,
+    "tiein_s": 0.0,
+    "riser_feet_h": 1.0,
+    "riser_head_h": 0.5,
+    "riser_size": 0.25,
+    "riser_column": 1.5,
+    "riser_hold_s": 1.5,
+    "riser_margin": 0.15,
+    "riser_floor": 0.5,
+    "learn_gate": false,
+    "learn_max_speed": 1.0,
+    "fall_size": false,
+    "fall_size_ratio": 6.0,
+    "fall_size_s": 4.0,
+    "fall_speed": 2.0,
+    "negatives": false,
+    "neg_lam": 1.0,
+    "neg_margin": 0.05,
+    "neg_colour": true,
+    "neg_every_s": 0.5,
+    "neg_size": 60,
+    "transact": false,
+    "commit_s": 5.0,
+    "doubt_rival": 0.05
+   }
+  },
+  {
+   "name": "combo",
+   "config": {
+    "app_min": 0.5,
+    "app_rel": 0.75,
+    "accept": 0.55,
+    "reacquire_app": 0.75,
+    "reacquire_frames": 3,
+    "uncertain_s": 2.0,
+    "adapt_rate": 0.03,
+    "adapt_app": 0.7,
+    "use_colour": true,
+    "use_reid": true,
+    "colour_weight": 0.2,
+    "reid_mode": "blend",
+    "reid_lo": 0.35,
+    "reid_hi": 0.75,
+    "gallery_size": 30,
+    "gallery_every_s": 1.0,
+    "max_sigma": 3.0,
+    "ground_rule": true,
+    "max_size_ratio": 2.5,
+    "jump_guard": true,
+    "move_rate": 1.5,
+    "fall_accel": 11.5,
+    "jump_margin": 0.1,
+    "settle_s": 0.5,
+    "others_always": false,
+    "unstable_shift": 1.0,
+    "switch_margin": 0.1,
+    "track_keep_s": 1.0,
+    "ground_latch": true,
+    "tiein_s": 60.0,
+    "riser_feet_h": 1.0,
+    "riser_head_h": 0.5,
+    "riser_size": 0.25,
+    "riser_column": 1.5,
+    "riser_hold_s": 1.5,
+    "riser_margin": 0.15,
+    "riser_floor": 0.5,
+    "learn_gate": true,
+    "learn_max_speed": 1.0,
+    "fall_size": true,
+    "fall_size_ratio": 6.0,
+    "fall_size_s": 4.0,
+    "fall_speed": 2.0,
+    "negatives": true,
+    "neg_lam": 1.0,
+    "neg_margin": 0.05,
+    "neg_colour": true,
+    "neg_every_s": 0.5,
+    "neg_size": 60,
+    "transact": true,
+    "commit_s": 5.0,
+    "doubt_rival": 0.05
+   }
+  },
+  {
+   "name": "combo_alt",
+   "config": {
+    "app_min": 0.5,
+    "app_rel": 0.75,
+    "accept": 0.55,
+    "reacquire_app": 0.75,
+    "reacquire_frames": 3,
+    "uncertain_s": 2.0,
+    "adapt_rate": 0.03,
+    "adapt_app": 0.7,
+    "use_colour": true,
+    "use_reid": true,
+    "colour_weight": 0.2,
+    "reid_mode": "fallback",
+    "reid_lo": 0.35,
+    "reid_hi": 0.75,
+    "gallery_size": 30,
+    "gallery_every_s": 1.0,
+    "max_sigma": 3.0,
+    "ground_rule": true,
+    "max_size_ratio": 2.5,
+    "jump_guard": true,
+    "move_rate": 1.5,
+    "fall_accel": 11.5,
+    "jump_margin": 0.1,
+    "settle_s": 0.5,
+    "others_always": true,
+    "unstable_shift": 1.0,
+    "switch_margin": 0.1,
+    "track_keep_s": 1.0,
+    "ground_latch": true,
+    "tiein_s": 60.0,
+    "riser_feet_h": 1.0,
+    "riser_head_h": 0.5,
+    "riser_size": 0.25,
+    "riser_column": 1.5,
+    "riser_hold_s": 1.5,
+    "riser_margin": 0.15,
+    "riser_floor": 0.5,
+    "learn_gate": true,
+    "learn_max_speed": 1.0,
+    "fall_size": true,
+    "fall_size_ratio": 6.0,
+    "fall_size_s": 4.0,
+    "fall_speed": 2.0,
+    "negatives": true,
+    "neg_lam": 1.0,
+    "neg_margin": 0.05,
+    "neg_colour": true,
+    "neg_every_s": 0.5,
+    "neg_size": 60,
+    "transact": false,
+    "commit_s": 5.0,
+    "doubt_rival": 0.05
+   }
+  },
+  {
+   "name": "colour_tiein",
+   "config": {
+    "app_min": 0.5,
+    "app_rel": 0.75,
+    "accept": 0.55,
+    "reacquire_app": 0.75,
+    "reacquire_frames": 3,
+    "uncertain_s": 2.0,
+    "adapt_rate": 0.03,
+    "adapt_app": 0.7,
+    "use_colour": true,
+    "use_reid": false,
+    "colour_weight": 0.2,
+    "reid_mode": "blend",
+    "reid_lo": 0.35,
+    "reid_hi": 0.75,
+    "gallery_size": 30,
+    "gallery_every_s": 1.0,
+    "max_sigma": 3.0,
+    "ground_rule": true,
+    "max_size_ratio": 2.5,
+    "jump_guard": true,
+    "move_rate": 1.5,
+    "fall_accel": 11.5,
+    "jump_margin": 0.1,
+    "settle_s": 0.5,
+    "others_always": false,
+    "unstable_shift": 1.0,
+    "switch_margin": 0.1,
+    "track_keep_s": 1.0,
+    "ground_latch": false,
+    "tiein_s": 60.0,
+    "riser_feet_h": 1.0,
+    "riser_head_h": 0.5,
+    "riser_size": 0.25,
+    "riser_column": 1.5,
+    "riser_hold_s": 1.5,
+    "riser_margin": 0.15,
+    "riser_floor": 0.5,
+    "learn_gate": false,
+    "learn_max_speed": 1.0,
+    "fall_size": false,
+    "fall_size_ratio": 6.0,
+    "fall_size_s": 4.0,
+    "fall_speed": 2.0,
+    "negatives": false,
+    "neg_lam": 1.0,
+    "neg_margin": 0.05,
+    "neg_colour": true,
+    "neg_every_s": 0.5,
+    "neg_size": 60,
+    "transact": false,
+    "commit_s": 5.0,
+    "doubt_rival": 0.05
+   }
+  },
+  {
+   "name": "unguarded",
+   "config": {
+    "app_min": 0.5,
+    "app_rel": 0.75,
+    "accept": 0.55,
+    "reacquire_app": 0.75,
+    "reacquire_frames": 3,
+    "uncertain_s": 2.0,
+    "adapt_rate": 0.03,
+    "adapt_app": 0.7,
+    "use_colour": true,
+    "use_reid": true,
+    "colour_weight": 0.2,
+    "reid_mode": "blend",
+    "reid_lo": 0.35,
+    "reid_hi": 0.75,
+    "gallery_size": 30,
+    "gallery_every_s": 1.0,
+    "max_sigma": 3.0,
+    "ground_rule": true,
+    "max_size_ratio": 2.5,
+    "jump_guard": true,
+    "move_rate": 1.5,
+    "fall_accel": 11.5,
+    "jump_margin": 0.1,
+    "settle_s": 0.5,
+    "others_always": false,
+    "unstable_shift": 1.0,
+    "switch_margin": -1.0,
+    "track_keep_s": 0.0,
+    "ground_latch": false,
+    "tiein_s": 0.0,
+    "riser_feet_h": 1.0,
+    "riser_head_h": 0.5,
+    "riser_size": 0.25,
+    "riser_column": 1.5,
+    "riser_hold_s": 1.5,
+    "riser_margin": 0.15,
+    "riser_floor": 0.5,
+    "learn_gate": false,
+    "learn_max_speed": 1.0,
+    "fall_size": false,
+    "fall_size_ratio": 6.0,
+    "fall_size_s": 4.0,
+    "fall_speed": 2.0,
+    "negatives": false,
+    "neg_lam": 1.0,
+    "neg_margin": 0.05,
+    "neg_colour": true,
+    "neg_every_s": 0.5,
+    "neg_size": 60,
+    "transact": false,
+    "commit_s": 5.0,
+    "doubt_rival": 0.05
+   }
+  },
+  {
+   "name": "no_keep",
+   "config": {
+    "app_min": 0.5,
+    "app_rel": 0.75,
+    "accept": 0.55,
+    "reacquire_app": 0.75,
+    "reacquire_frames": 3,
+    "uncertain_s": 2.0,
+    "adapt_rate": 0.03,
+    "adapt_app": 0.7,
+    "use_colour": true,
+    "use_reid": true,
+    "colour_weight": 0.2,
+    "reid_mode": "blend",
+    "reid_lo": 0.35,
+    "reid_hi": 0.75,
+    "gallery_size": 30,
+    "gallery_every_s": 1.0,
+    "max_sigma": 3.0,
+    "ground_rule": true,
+    "max_size_ratio": 2.5,
+    "jump_guard": true,
+    "move_rate": 1.5,
+    "fall_accel": 11.5,
+    "jump_margin": 0.1,
+    "settle_s": 0.5,
+    "others_always": false,
+    "unstable_shift": 1.0,
+    "switch_margin": 0.1,
+    "track_keep_s": 0.0,
+    "ground_latch": false,
+    "tiein_s": 0.0,
+    "riser_feet_h": 1.0,
+    "riser_head_h": 0.5,
+    "riser_size": 0.25,
+    "riser_column": 1.5,
+    "riser_hold_s": 1.5,
+    "riser_margin": 0.15,
+    "riser_floor": 0.5,
+    "learn_gate": false,
+    "learn_max_speed": 1.0,
+    "fall_size": false,
+    "fall_size_ratio": 6.0,
+    "fall_size_s": 4.0,
+    "fall_speed": 2.0,
+    "negatives": false,
+    "neg_lam": 1.0,
+    "neg_margin": 0.05,
+    "neg_colour": true,
+    "neg_every_s": 0.5,
+    "neg_size": 60,
+    "transact": false,
+    "commit_s": 5.0,
+    "doubt_rival": 0.05
+   }
+  }
+ ],
+ "results": {
+  "default": {
+   "locked": 66,
+   "uncertain": 9,
+   "lost": 0,
+   "relocks": 0,
+   "jump_refusals": 0,
+   "unstable": 0,
+   "latched": 0,
+   "max_gallery": 2,
+   "max_negs": 0,
+   "max_pending": 0,
+   "events": []
+  },
+  "combo": {
+   "locked": 66,
+   "uncertain": 9,
+   "lost": 0,
+   "relocks": 0,
+   "jump_refusals": 0,
+   "unstable": 0,
+   "latched": 35,
+   "max_gallery": 2,
+   "max_negs": 0,
+   "max_pending": 48,
+   "events": []
+  },
+  "combo_alt": {
+   "locked": 67,
+   "uncertain": 8,
+   "lost": 0,
+   "relocks": 0,
+   "jump_refusals": 10,
+   "unstable": 0,
+   "latched": 34,
+   "max_gallery": 2,
+   "max_negs": 0,
+   "max_pending": 0,
+   "events": []
+  },
+  "colour_tiein": {
+   "locked": 67,
+   "uncertain": 8,
+   "lost": 0,
+   "relocks": 0,
+   "jump_refusals": 0,
+   "unstable": 0,
+   "latched": 0,
+   "max_gallery": 2,
+   "max_negs": 0,
+   "max_pending": 0,
+   "events": []
+  },
+  "unguarded": {
+   "locked": 75,
+   "uncertain": 0,
+   "lost": 0,
+   "relocks": 0,
+   "jump_refusals": 0,
+   "unstable": 0,
+   "latched": 0,
+   "max_gallery": 2,
+   "max_negs": 0,
+   "max_pending": 0,
+   "events": []
+  },
+  "no_keep": {
+   "locked": 75,
+   "uncertain": 0,
+   "lost": 0,
+   "relocks": 0,
+   "jump_refusals": 0,
+   "unstable": 0,
+   "latched": 0,
+   "max_gallery": 2,
+   "max_negs": 0,
+   "max_pending": 0,
+   "events": []
+  }
+ },
+ "tag_index": 0,
+ "arrays": {
+  "boxes": {
+   "dtype": "f4",
+   "shape": [
+    145,
+    4
+   ],
+   "offset": 0
+  },
+  "feats": {
+   "dtype": "f2",
+   "shape": [
+    145,
+    4,
+    17
+   ],
+   "offset": 2320
+  },
+  "valids": {
+   "dtype": "u1",
+   "shape": [
+    145,
+    4
+   ],
+   "offset": 22040
+  },
+  "embs": {
+   "dtype": "f2",
+   "shape": [
+    145,
+    8
+   ],
+   "offset": 22620
+  },
+  "offsets": {
+   "dtype": "i4",
+   "shape": [
+    76
+   ],
+   "offset": 24940
+  },
+  "t": {
+   "dtype": "f8",
+   "shape": [
+    75
+   ],
+   "offset": 25244
+  },
+  "shift": {
+   "dtype": "f8",
+   "shape": [
+    75,
+    2
+   ],
+   "offset": 25844
+  },
+  "conf": {
+   "dtype": "f8",
+   "shape": [
+    75
+   ],
+   "offset": 27044
+  },
+  "tap": {
+   "dtype": "f8",
+   "shape": [
+    2
+   ],
+   "offset": 27644
+  },
+  "tag/box": {
+   "dtype": "f8",
+   "shape": [
+    4
+   ],
+   "offset": 27660
+  },
+  "tag/feat": {
+   "dtype": "f4",
+   "shape": [
+    68
+   ],
+   "offset": 27692
+  },
+  "tag/valid": {
+   "dtype": "u1",
+   "shape": [
+    4
+   ],
+   "offset": 27964
+  },
+  "tag/emb": {
+   "dtype": "f4",
+   "shape": [
+    8
+   ],
+   "offset": 27968
+  },
+  "default/state": {
+   "dtype": "u1",
+   "shape": [
+    75
+   ],
+   "offset": 28000
+  },
+  "default/chosen": {
+   "dtype": "i2",
+   "shape": [
+    75
+   ],
+   "offset": 28075
+  },
+  "default/app": {
+   "dtype": "f8",
+   "shape": [
+    75
+   ],
+   "offset": 28225
+  },
+  "default/score": {
+   "dtype": "f8",
+   "shape": [
+    75
+   ],
+   "offset": 28825
+  },
+  "default/flags": {
+   "dtype": "u1",
+   "shape": [
+    75
+   ],
+   "offset": 29425
+  },
+  "default/ground": {
+   "dtype": "f8",
+   "shape": [
+    75
+   ],
+   "offset": 29500
+  },
+  "default/app_level": {
+   "dtype": "f8",
+   "shape": [
+    75
+   ],
+   "offset": 30100
+  },
+  "default/source": {
+   "dtype": "u1",
+   "shape": [
+    75
+   ],
+   "offset": 30700
+  },
+  "default/box": {
+   "dtype": "f8",
+   "shape": [
+    75,
+    4
+   ],
+   "offset": 30775
+  },
+  "default/vel": {
+   "dtype": "f8",
+   "shape": [
+    75,
+    2
+   ],
+   "offset": 33175
+  },
+  "default/pred": {
+   "dtype": "f8",
+   "shape": [
+    75,
+    4
+   ],
+   "offset": 34375
+  },
+  "default/counts": {
+   "dtype": "i2",
+   "shape": [
+    75,
+    4
+   ],
+   "offset": 36775
+  },
+  "default/act": {
+   "dtype": "i2",
+   "shape": [
+    75,
+    3
+   ],
+   "offset": 37375
+  },
+  "combo/state": {
+   "dtype": "u1",
+   "shape": [
+    75
+   ],
+   "offset": 37825
+  },
+  "combo/chosen": {
+   "dtype": "i2",
+   "shape": [
+    75
+   ],
+   "offset": 37900
+  },
+  "combo/app": {
+   "dtype": "f8",
+   "shape": [
+    75
+   ],
+   "offset": 38050
+  },
+  "combo/score": {
+   "dtype": "f8",
+   "shape": [
+    75
+   ],
+   "offset": 38650
+  },
+  "combo/flags": {
+   "dtype": "u1",
+   "shape": [
+    75
+   ],
+   "offset": 39250
+  },
+  "combo/ground": {
+   "dtype": "f8",
+   "shape": [
+    75
+   ],
+   "offset": 39325
+  },
+  "combo/app_level": {
+   "dtype": "f8",
+   "shape": [
+    75
+   ],
+   "offset": 39925
+  },
+  "combo/source": {
+   "dtype": "u1",
+   "shape": [
+    75
+   ],
+   "offset": 40525
+  },
+  "combo/box": {
+   "dtype": "f8",
+   "shape": [
+    75,
+    4
+   ],
+   "offset": 40600
+  },
+  "combo/vel": {
+   "dtype": "f8",
+   "shape": [
+    75,
+    2
+   ],
+   "offset": 43000
+  },
+  "combo/pred": {
+   "dtype": "f8",
+   "shape": [
+    75,
+    4
+   ],
+   "offset": 44200
+  },
+  "combo/counts": {
+   "dtype": "i2",
+   "shape": [
+    75,
+    4
+   ],
+   "offset": 46600
+  },
+  "combo/act": {
+   "dtype": "i2",
+   "shape": [
+    75,
+    3
+   ],
+   "offset": 47200
+  },
+  "combo_alt/state": {
+   "dtype": "u1",
+   "shape": [
+    75
+   ],
+   "offset": 47650
+  },
+  "combo_alt/chosen": {
+   "dtype": "i2",
+   "shape": [
+    75
+   ],
+   "offset": 47725
+  },
+  "combo_alt/app": {
+   "dtype": "f8",
+   "shape": [
+    75
+   ],
+   "offset": 47875
+  },
+  "combo_alt/score": {
+   "dtype": "f8",
+   "shape": [
+    75
+   ],
+   "offset": 48475
+  },
+  "combo_alt/flags": {
+   "dtype": "u1",
+   "shape": [
+    75
+   ],
+   "offset": 49075
+  },
+  "combo_alt/ground": {
+   "dtype": "f8",
+   "shape": [
+    75
+   ],
+   "offset": 49150
+  },
+  "combo_alt/app_level": {
+   "dtype": "f8",
+   "shape": [
+    75
+   ],
+   "offset": 49750
+  },
+  "combo_alt/source": {
+   "dtype": "u1",
+   "shape": [
+    75
+   ],
+   "offset": 50350
+  },
+  "combo_alt/box": {
+   "dtype": "f8",
+   "shape": [
+    75,
+    4
+   ],
+   "offset": 50425
+  },
+  "combo_alt/vel": {
+   "dtype": "f8",
+   "shape": [
+    75,
+    2
+   ],
+   "offset": 52825
+  },
+  "combo_alt/pred": {
+   "dtype": "f8",
+   "shape": [
+    75,
+    4
+   ],
+   "offset": 54025
+  },
+  "combo_alt/counts": {
+   "dtype": "i2",
+   "shape": [
+    75,
+    4
+   ],
+   "offset": 56425
+  },
+  "combo_alt/act": {
+   "dtype": "i2",
+   "shape": [
+    75,
+    3
+   ],
+   "offset": 57025
+  },
+  "colour_tiein/state": {
+   "dtype": "u1",
+   "shape": [
+    75
+   ],
+   "offset": 57475
+  },
+  "colour_tiein/chosen": {
+   "dtype": "i2",
+   "shape": [
+    75
+   ],
+   "offset": 57550
+  },
+  "colour_tiein/app": {
+   "dtype": "f8",
+   "shape": [
+    75
+   ],
+   "offset": 57700
+  },
+  "colour_tiein/score": {
+   "dtype": "f8",
+   "shape": [
+    75
+   ],
+   "offset": 58300
+  },
+  "colour_tiein/flags": {
+   "dtype": "u1",
+   "shape": [
+    75
+   ],
+   "offset": 58900
+  },
+  "colour_tiein/ground": {
+   "dtype": "f8",
+   "shape": [
+    75
+   ],
+   "offset": 58975
+  },
+  "colour_tiein/app_level": {
+   "dtype": "f8",
+   "shape": [
+    75
+   ],
+   "offset": 59575
+  },
+  "colour_tiein/source": {
+   "dtype": "u1",
+   "shape": [
+    75
+   ],
+   "offset": 60175
+  },
+  "colour_tiein/box": {
+   "dtype": "f8",
+   "shape": [
+    75,
+    4
+   ],
+   "offset": 60250
+  },
+  "colour_tiein/vel": {
+   "dtype": "f8",
+   "shape": [
+    75,
+    2
+   ],
+   "offset": 62650
+  },
+  "colour_tiein/pred": {
+   "dtype": "f8",
+   "shape": [
+    75,
+    4
+   ],
+   "offset": 63850
+  },
+  "colour_tiein/counts": {
+   "dtype": "i2",
+   "shape": [
+    75,
+    4
+   ],
+   "offset": 66250
+  },
+  "colour_tiein/act": {
+   "dtype": "i2",
+   "shape": [
+    75,
+    3
+   ],
+   "offset": 66850
+  },
+  "unguarded/state": {
+   "dtype": "u1",
+   "shape": [
+    75
+   ],
+   "offset": 67300
+  },
+  "unguarded/chosen": {
+   "dtype": "i2",
+   "shape": [
+    75
+   ],
+   "offset": 67375
+  },
+  "unguarded/app": {
+   "dtype": "f8",
+   "shape": [
+    75
+   ],
+   "offset": 67525
+  },
+  "unguarded/score": {
+   "dtype": "f8",
+   "shape": [
+    75
+   ],
+   "offset": 68125
+  },
+  "unguarded/flags": {
+   "dtype": "u1",
+   "shape": [
+    75
+   ],
+   "offset": 68725
+  },
+  "unguarded/ground": {
+   "dtype": "f8",
+   "shape": [
+    75
+   ],
+   "offset": 68800
+  },
+  "unguarded/app_level": {
+   "dtype": "f8",
+   "shape": [
+    75
+   ],
+   "offset": 69400
+  },
+  "unguarded/source": {
+   "dtype": "u1",
+   "shape": [
+    75
+   ],
+   "offset": 70000
+  },
+  "unguarded/box": {
+   "dtype": "f8",
+   "shape": [
+    75,
+    4
+   ],
+   "offset": 70075
+  },
+  "unguarded/vel": {
+   "dtype": "f8",
+   "shape": [
+    75,
+    2
+   ],
+   "offset": 72475
+  },
+  "unguarded/pred": {
+   "dtype": "f8",
+   "shape": [
+    75,
+    4
+   ],
+   "offset": 73675
+  },
+  "unguarded/counts": {
+   "dtype": "i2",
+   "shape": [
+    75,
+    4
+   ],
+   "offset": 76075
+  },
+  "unguarded/act": {
+   "dtype": "i2",
+   "shape": [
+    75,
+    3
+   ],
+   "offset": 76675
+  },
+  "no_keep/state": {
+   "dtype": "u1",
+   "shape": [
+    75
+   ],
+   "offset": 77125
+  },
+  "no_keep/chosen": {
+   "dtype": "i2",
+   "shape": [
+    75
+   ],
+   "offset": 77200
+  },
+  "no_keep/app": {
+   "dtype": "f8",
+   "shape": [
+    75
+   ],
+   "offset": 77350
+  },
+  "no_keep/score": {
+   "dtype": "f8",
+   "shape": [
+    75
+   ],
+   "offset": 77950
+  },
+  "no_keep/flags": {
+   "dtype": "u1",
+   "shape": [
+    75
+   ],
+   "offset": 78550
+  },
+  "no_keep/ground": {
+   "dtype": "f8",
+   "shape": [
+    75
+   ],
+   "offset": 78625
+  },
+  "no_keep/app_level": {
+   "dtype": "f8",
+   "shape": [
+    75
+   ],
+   "offset": 79225
+  },
+  "no_keep/source": {
+   "dtype": "u1",
+   "shape": [
+    75
+   ],
+   "offset": 79825
+  },
+  "no_keep/box": {
+   "dtype": "f8",
+   "shape": [
+    75,
+    4
+   ],
+   "offset": 79900
+  },
+  "no_keep/vel": {
+   "dtype": "f8",
+   "shape": [
+    75,
+    2
+   ],
+   "offset": 82300
+  },
+  "no_keep/pred": {
+   "dtype": "f8",
+   "shape": [
+    75,
+    4
+   ],
+   "offset": 83500
+  },
+  "no_keep/counts": {
+   "dtype": "i2",
+   "shape": [
+    75,
+    4
+   ],
+   "offset": 85900
+  },
+  "no_keep/act": {
+   "dtype": "i2",
+   "shape": [
+    75,
+    3
+   ],
+   "offset": 86500
+  }
+ },
+ "raw_bytes": 86950
+}

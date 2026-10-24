@@ -43,6 +43,13 @@ public struct TrackerConfig: Codable, Sendable, Equatable {
     public var settleS = 0.5          // seen this long as a separate person = someone else
     public var othersAlways = false   // ...and someone else can't take the lock even when their box touches
     public var unstableShift = 1.0    // camera moved this many body heights in a frame: freeze identity
+    // Two people stay two people: look-alikes on neighbouring routes, seen from a steep side or from below, stack
+    // up with touching boxes and the same look. Someone else (seen beside the locked climber for settleS, or anyone
+    // in view while the track the lock has held for settleS is) may take the lock, touching or not, only by beating
+    // the climber's own track by switchMargin, and not while that track is unseen or ruled out; people the detector
+    // misses stay remembered for trackKeepS.
+    public var switchMargin = 0.1     // score; < 0: off
+    public var trackKeepS = 1.0       // remember someone the detector missed this long (0: last frame only)
     // Ground rule independent of the lock being right: "the climber is up" holds through a loss and is
     // released only by following them down; the ground line moves with the camera; tagged mid-wall,
     // someone standing beside the tag gives the ground.
@@ -110,6 +117,7 @@ public struct TrackerConfig: Codable, Sendable, Equatable {
         try v(.groundRule, &groundRule); try v(.maxSizeRatio, &maxSizeRatio); try v(.jumpGuard, &jumpGuard)
         try v(.moveRate, &moveRate); try v(.fallAccel, &fallAccel); try v(.jumpMargin, &jumpMargin)
         try v(.settleS, &settleS); try v(.othersAlways, &othersAlways); try v(.unstableShift, &unstableShift)
+        try v(.switchMargin, &switchMargin); try v(.trackKeepS, &trackKeepS)
         try v(.groundLatch, &groundLatch); try v(.tieinS, &tieinS); try v(.riserFeetH, &riserFeetH)
         try v(.riserHeadH, &riserHeadH); try v(.riserSize, &riserSize); try v(.riserColumn, &riserColumn)
         try v(.riserHoldS, &riserHoldS); try v(.riserMargin, &riserMargin); try v(.riserFloor, &riserFloor)

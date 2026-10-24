@@ -3,7 +3,8 @@ import Testing
 @testable import TrackerCore
 
 // directe_tracking/tracker.py `selftest` (python -m lab.tracker), scene for scene: the jump guard on synthetic
-// scenes where everyone looks identical, so only geometry decides; then the tie-in phase.
+// scenes where everyone looks identical, so only geometry decides; a look-alike stacked below the climber
+// (Config.switch_margin); then the tie-in phase.
 
 private let H = 200.0  // body height, px
 private let R = AppearanceSpec.regions.count, D = AppearanceSpec.dim
@@ -78,6 +79,42 @@ func selftestCameraBump(known: Bool) {
             #expect(on(s, 500 + off.x, 600 + off.y), "known bump lost the climber at t=\(t): \(s.state)")
         }
     }
+}
+
+/// A look-alike climbs a body length below on the next route, seen steeply from the side: the boxes overlap. With
+/// `gaps` the detector misses the look-alike for a frame, then the climber for 0.4 s; without, the climber's colour
+/// reads wrong for a frame (torso and legs). True if the lock ever moved onto the look-alike.
+private func stackedTookLock(_ cfg: TrackerConfig, gaps: Bool) -> Bool {
+    let trk = tracker(cfg)
+    var s: Step!, y = 600.0
+    for k in 1..<50 {
+        let t = Double(k) * 0.1
+        y = 600 - 0.25 * H * t
+        var pts: [(Double, Double)] = gaps && 2.0 <= t && t < 2.4 ? [] : [(500, y)]
+        if !(gaps && abs(t - 1.9) < 1e-6) { pts.append((540, y + 0.8 * H)) }
+        var c = cands(pts)
+        if !gaps && abs(t - 3.0) < 1e-6 {
+            var f = Array(repeating: Float(0), count: D)
+            f[3] = 1
+            for r in 1..<R { c[0].feats[r] = f }
+        }
+        s = trk.step(t: t, view: c)
+        if on(s, 540, y + 0.8 * H) { return true }
+    }
+    #expect(on(s, 500, y), "didn't keep the climber: \(s.state) \(s.box)")
+    return false
+}
+
+@Test func selftestStacked() {
+    var off = TrackerConfig()
+    off.switchMargin = -1
+    off.trackKeepS = 0
+    #expect(stackedTookLock(off, gaps: true) && stackedTookLock(off, gaps: false), "test is too easy: the look-alike never took the lock")
+    var noKeep = TrackerConfig()
+    noKeep.trackKeepS = 0
+    #expect(stackedTookLock(noKeep, gaps: true), "test is too easy: without remembering missed people it held anyway")
+    #expect(!stackedTookLock(TrackerConfig(), gaps: true), "a look-alike stacked below took the lock while the climber was missed")
+    #expect(!stackedTookLock(TrackerConfig(), gaps: false), "a look-alike stacked below took the lock when the climber's colour wobbled")
 }
 
 /// Tie-in: climber A (colour 0) beside belayer B (mostly colour 5). If the lock slid onto B while A

@@ -15,8 +15,9 @@ float64, as an app passes boxes), flags bit 0 = release(t), bit 1 = allow_reacqu
 Synthetic scenes (float32 boxes, 8-d embeddings): the selftest's scenes (fall at 10/5 fps, lookalike, camera bumps,
 tie-in slid/queue) plus a tiny climber (height < 30 px), a climber tagged with the feet at the frame bottom who
 climbs up and back down past a belayer (ground latch on and off, empty frames), an embedding that drifts toward a
-banked negative, and a spotter. Configs: default, combo, combo_alt (combo + reid_mode fallback, others_always, no
-transact) and colour_tiein (colour only, tiein_s=60, as the selftest's tie-in).
+banked negative, a spotter, and a look-alike stacked below the climber (Config.switch_margin). Configs: default,
+combo, combo_alt (combo + reid_mode fallback, others_always, no transact) and colour_tiein (colour only, tiein_s=60,
+as the selftest's tie-in); the stacked scene adds unguarded (switch_margin off) and no_keep (track_keep_s 0).
 
 The same machinery records cases on real footage (`write(case, out)`, cases built from cached detections); those
 stay with whoever filmed them, and the Swift tests pick them up from $DIRECTE_GOLDEN.
@@ -334,6 +335,30 @@ def scenes() -> list[Case]:
         frames.append((t, [person(500 + 10 * np.sin(t), 600, unit((1 - a) * EA + a * EB)),
                            person(500 + 2.5 * SB, 600, EB), person(500 - 4 * SB, 600, ED)]))
     out.append(synthetic("drift", frames, desc="the climber's embedding drifts toward a banked negative"))
+
+    frames = []
+    off = colour((3, 1.0))
+    for k in range(75):
+        t = k * 0.1
+        y = 1200 - 0.25 * SB * t
+        h, emb, feat = SB, EA, UNIFORM
+        if 3.0 <= t < 3.2:
+            feat = off                    # the climber's colour reads wrong
+        if 4.5 <= t < 4.8:
+            emb = unit(0.1 * EA + 0.9 * EB)  # ... their re-ID view too
+        if 6.6 <= t < 6.9:
+            h, emb = 0.6 * SB, unit(0.25 * EA + 0.75 * EB)  # folded up and turned: the look-alike now wins clearly
+        ps = [] if 2.0 <= t < 2.4 or 5.5 <= t < 5.7 else [person(500, y, emb, h=h, feat=feat)]
+        if abs(t - 2.6) < 1e-6 or abs(t - 5.0) < 1e-6:
+            ps.append(person(500, y - 0.2 * SB, EA, h=0.6 * SB))  # a second box: the climber's upper body
+        if not abs(t - 1.9) < 1e-6:  # the look-alike, missed once; it closes in below, then beside
+            ps.append(person(540, y + 0.8 * SB, ED) if t < 4.0 else
+                      person(540, y + 0.35 * SB, ED) if t < 6.0 else person(560, y + 0.1 * SB, ED))
+        frames.append((t, ps))
+    out.append(synthetic("stacked", frames, configs={**SYNTH_CONFIGS, "unguarded": {"switch_margin": -1.0, "track_keep_s": 0.0},
+                                                     "no_keep": {"track_keep_s": 0.0}},
+                         desc="a look-alike a body length below on the next route (steep side view, boxes overlap): "
+                         "missed detections, colour and re-ID wobbles, a second box of the climber"))
     return out
 
 
