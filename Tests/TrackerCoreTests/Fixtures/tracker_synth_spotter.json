@@ -62,7 +62,9 @@
     "neg_size": 60,
     "transact": false,
     "commit_s": 5.0,
-    "doubt_rival": 0.05
+    "doubt_rival": 0.05,
+    "one_to_one": true,
+    "keep_apart": true
    }
   },
   {
@@ -119,7 +121,9 @@
     "neg_size": 60,
     "transact": true,
     "commit_s": 5.0,
-    "doubt_rival": 0.05
+    "doubt_rival": 0.05,
+    "one_to_one": true,
+    "keep_apart": true
    }
   },
   {
@@ -176,7 +180,9 @@
     "neg_size": 60,
     "transact": false,
     "commit_s": 5.0,
-    "doubt_rival": 0.05
+    "doubt_rival": 0.05,
+    "one_to_one": true,
+    "keep_apart": true
    }
   },
   {
@@ -233,28 +239,30 @@
     "neg_size": 60,
     "transact": false,
     "commit_s": 5.0,
-    "doubt_rival": 0.05
+    "doubt_rival": 0.05,
+    "one_to_one": true,
+    "keep_apart": true
    }
   }
  ],
  "results": {
   "default": {
-   "locked": 26,
+   "locked": 21,
    "uncertain": 10,
-   "lost": 4,
+   "lost": 9,
    "relocks": 2,
    "jump_refusals": 10,
    "unstable": 0,
    "latched": 0,
-   "max_gallery": 2,
+   "max_gallery": 1,
    "max_negs": 0,
    "max_pending": 0,
    "events": []
   },
   "combo": {
-   "locked": 26,
+   "locked": 21,
    "uncertain": 10,
-   "lost": 4,
+   "lost": 9,
    "relocks": 2,
    "jump_refusals": 10,
    "unstable": 0,
@@ -265,27 +273,27 @@
    "events": []
   },
   "combo_alt": {
-   "locked": 26,
+   "locked": 21,
    "uncertain": 10,
-   "lost": 4,
+   "lost": 9,
    "relocks": 2,
    "jump_refusals": 10,
    "unstable": 0,
    "latched": 0,
-   "max_gallery": 2,
+   "max_gallery": 1,
    "max_negs": 1,
    "max_pending": 0,
    "events": []
   },
   "colour_tiein": {
-   "locked": 26,
+   "locked": 21,
    "uncertain": 10,
-   "lost": 4,
+   "lost": 9,
    "relocks": 2,
    "jump_refusals": 10,
    "unstable": 0,
    "latched": 0,
-   "max_gallery": 2,
+   "max_gallery": 1,
    "max_negs": 0,
    "max_pending": 0,
    "events": []

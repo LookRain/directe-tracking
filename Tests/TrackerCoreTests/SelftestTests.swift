@@ -117,6 +117,61 @@ private func stackedTookLock(_ cfg: TrackerConfig, gaps: Bool) -> Bool {
     #expect(!stackedTookLock(TrackerConfig(), gaps: false), "a look-alike stacked below took the lock when the climber's colour wobbled")
 }
 
+/// A passer-by (another colour) walks across in front of the climber, hiding them for a few frames. True if the lock
+/// is back on the climber within 0.5 s of them reappearing and stays there (TrackerConfig.oneToOne).
+private func crossingKeepsClimber(_ cfg: TrackerConfig) -> Bool {
+    let trk = tracker(cfg)
+    var back: Double?
+    for k in 1..<60 {
+        let t = Double(k) * 0.1
+        let px = 500 - 2 * H + 0.1 * H * Double(k)  // 1 body height/s
+        let hidden = abs(px - 500) < 0.35 * H
+        var c = cands((hidden ? [] : [(500, 600)]) + [(px, 600)])
+        var f = Array(repeating: Float(0), count: D)
+        f[7] = 1
+        c[c.count - 1].feats = Array(repeating: f, count: R)
+        let s = trk.step(t: t, view: c)
+        if back == nil && !hidden && px > 500 { back = t }
+        if let b = back, t >= b + 0.5, !on(s, 500, 600) { return false }
+    }
+    return true
+}
+
+@Test func selftestCrossing() {
+    var off = TrackerConfig()
+    off.oneToOne = false
+    #expect(!crossingKeepsClimber(off), "test is too easy: the climber came back without one-to-one tracks")
+    #expect(crossingKeepsClimber(TrackerConfig()), "a passer-by crossing in front took over the climber's track")
+}
+
+/// An identical look-alike climbs 1.3 body heights beside the climber; the climber is hidden for 4 s (the lock is
+/// lost after 2). True if the lock went to the look-alike (TrackerConfig.keepApart).
+private func apartTookLock(_ cfg: TrackerConfig) -> Bool {
+    let trk = tracker(cfg)
+    var s: Step!
+    for k in 1..<70 {
+        let t = Double(k) * 0.1
+        s = trk.step(t: t, view: cands((2.0 <= t && t < 6.0 ? [] : [(500, 600)]) + [(500 - 1.3 * H, 600)]))
+        if on(s, 500 - 1.3 * H, 600) { return true }
+    }
+    #expect(on(s, 500, 600), "didn't get the climber back: \(s.state) \(s.box)")
+    return false
+}
+
+@Test func selftestKeepApart() {
+    var off = TrackerConfig()
+    off.keepApart = false
+    #expect(apartTookLock(off), "test is too easy: the look-alike wasn't re-acquired anyway")
+    #expect(!apartTookLock(TrackerConfig()), "a look-alike seen beside the climber was re-acquired while the climber was hidden")
+}
+
+/// The tag window follows the tapped person one to one, and stops once someone merges into their box.
+@Test func selftestTagFollow() {
+    let me = Box(0, 0, 60, 200), other = Box(50, 0, 110, 200)
+    #expect(follow(me, [me, other], 0, [other.offset(SIMD2(-8, 0)), me]) == 1, "followed the wrong one")
+    #expect(follow(me, [me, other], 0, [Box(5, 0, 100, 200)]) == -2, "missed a merge")
+}
+
 /// Tie-in: climber A (colour 0) beside belayer B (mostly colour 5). If the lock slid onto B while A
 /// was hidden, A climbing up beside B must take it back. If the lock stayed on A (a queue: B starts
 /// up the same line), it must not move.

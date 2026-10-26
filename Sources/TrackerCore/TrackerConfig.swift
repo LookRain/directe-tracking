@@ -82,6 +82,13 @@ public struct TrackerConfig: Codable, Sendable, Equatable {
     public var transact = false       // profile updates wait commitS with no doubt; any doubt discards them
     public var commitS = 5.0
     public var doubtRival = 0.05      // a rival this close is a doubt
+    // One person, one track: this frame's people take over last frame's tracks, and those of people missed lately,
+    // one to one, best overlap first. Each taking its own best overlap let two people inherit one track: a climber
+    // coming out from behind someone who crossed in front of them became that person, "seen beside the climber".
+    public var oneToOne = true
+    // Two people stay two people through a loss too: while lost, nobody seen beside the locked climber for settleS
+    // is re-acquired.
+    public var keepApart = true
 
     public init() {}
 
@@ -127,6 +134,7 @@ public struct TrackerConfig: Codable, Sendable, Equatable {
         try v(.negColour, &negColour); try v(.negEveryS, &negEveryS); try v(.negSize, &negSize)
         try v(.transact, &transact); try v(.commitS, &commitS); try v(.doubtRival, &doubtRival)
         try v(.galleryAdmit, &galleryAdmit); try v(.galleryNew, &galleryNew); try v(.negDedupe, &negDedupe)
+        try v(.oneToOne, &oneToOne); try v(.keepApart, &keepApart)
     }
 
     /// The re-ID calibration for another embedder: `reidLo`/`reidHi` set to `lo`/`hi`, and the constants in cosine

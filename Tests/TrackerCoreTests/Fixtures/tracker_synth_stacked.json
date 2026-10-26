@@ -62,7 +62,9 @@
     "neg_size": 60,
     "transact": false,
     "commit_s": 5.0,
-    "doubt_rival": 0.05
+    "doubt_rival": 0.05,
+    "one_to_one": true,
+    "keep_apart": true
    }
   },
   {
@@ -119,7 +121,9 @@
     "neg_size": 60,
     "transact": true,
     "commit_s": 5.0,
-    "doubt_rival": 0.05
+    "doubt_rival": 0.05,
+    "one_to_one": true,
+    "keep_apart": true
    }
   },
   {
@@ -176,7 +180,9 @@
     "neg_size": 60,
     "transact": false,
     "commit_s": 5.0,
-    "doubt_rival": 0.05
+    "doubt_rival": 0.05,
+    "one_to_one": true,
+    "keep_apart": true
    }
   },
   {
@@ -233,7 +239,9 @@
     "neg_size": 60,
     "transact": false,
     "commit_s": 5.0,
-    "doubt_rival": 0.05
+    "doubt_rival": 0.05,
+    "one_to_one": true,
+    "keep_apart": true
    }
   },
   {
@@ -290,7 +298,9 @@
     "neg_size": 60,
     "transact": false,
     "commit_s": 5.0,
-    "doubt_rival": 0.05
+    "doubt_rival": 0.05,
+    "one_to_one": true,
+    "keep_apart": true
    }
   },
   {
@@ -347,7 +357,9 @@
     "neg_size": 60,
     "transact": false,
     "commit_s": 5.0,
-    "doubt_rival": 0.05
+    "doubt_rival": 0.05,
+    "one_to_one": true,
+    "keep_apart": true
    }
   }
  ],

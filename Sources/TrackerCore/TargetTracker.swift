@@ -320,6 +320,7 @@ public final class TargetTracker {
     /// lately), whether that track is the one the lock has been following, and how long it was seen beside the
     /// locked climber (s).
     func trackInfo(_ cc: Cands) -> (age: [Double], isT: [Bool], beside: [Double]) {
+        if config.oneToOne { return assign(cc) }
         var age = [Double](repeating: 0, count: cc.count), isT = [Bool](repeating: false, count: cc.count)
         var beside = [Double](repeating: 0, count: cc.count)
         for (i, box) in cc.boxes.enumerated() {
@@ -342,6 +343,38 @@ public final class TargetTracker {
                     beside[i] = kept.beside[j]
                 }
             }
+        }
+        return (age, isT, beside)
+    }
+
+    /// `trackInfo` with TrackerConfig.oneToOne (the lab's `_assign`): this frame's people take over last frame's
+    /// tracks (and those of people missed lately) one to one, best overlap first (IoU > 0.3). A second box of someone
+    /// already matched (IoU >= 0.5: the pose and the segmentation boxes of one person) shares their track; anyone else
+    /// unmatched is new.
+    func assign(_ cc: Cands) -> (age: [Double], isT: [Bool], beside: [Double]) {
+        let n = cc.count
+        var age = [Double](repeating: 0, count: n), isT = [Bool](repeating: false, count: n)
+        var beside = [Double](repeating: 0, count: n)
+        let all = tracks.boxes + kept.boxes  // float64 in the lab (the missed people's boxes are)
+        guard n > 0, !all.isEmpty else { return (age, isT, beside) }
+        let A = tracks.age + kept.age, T = tracks.isT + kept.isT, N = tracks.beside + kept.beside
+        var M = cc.boxes.map { npIoU($0, true, all, false).v }
+        var got = [Int](repeating: -1, count: n)
+        while true {
+            var bi = 0, bj = 0, best = -Double.infinity
+            for i in 0..<n { for j in all.indices where M[i][j] > best { best = M[i][j]; bi = i; bj = j } }
+            if !(best > 0.3) { break }
+            got[bi] = bj
+            for j in all.indices { M[bi][j] = -1 }
+            for i in 0..<n { M[i][bj] = -1 }
+        }
+        for i in (0..<n).filter({ got[$0] < 0 }) {
+            if let k = (0..<n).first(where: { got[$0] >= 0 && npIoU(cc.boxes[$0], true, [cc.boxes[i]], true).ge(0, 0.5) }) {
+                got[i] = got[k]
+            }
+        }
+        for i in 0..<n where got[i] >= 0 {
+            age[i] = A[got[i]]; isT[i] = T[got[i]]; beside[i] = N[got[i]]
         }
         return (age, isT, beside)
     }
@@ -720,6 +753,10 @@ public final class TargetTracker {
         let bad = implausible(cc, hs, nil, false)
         let vet = vetoed(cc.count)
         for i in 0..<cc.count where bad[i] || vet[i] { app.v[i] = -1.0 }
+        if config.keepApart {  // seen beside the locked climber: someone else
+            let beside = trackInfo(cc).beside
+            for i in 0..<cc.count where beside[i] >= config.settleS { app.v[i] = -1.0 }
+        }
         let best = argmax(app.v)
         if app.lt(best, config.reacquireApp) {
             reacq = nil

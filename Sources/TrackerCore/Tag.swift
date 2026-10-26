@@ -27,9 +27,40 @@ public enum TagError: Error, Equatable {
     case noDetectionNearTap
 }
 
-/// The "tag climber" moment (lab tracker `tag`): pick the detection under the tap, follow it by
-/// overlap through the window (longer than `seconds` if the body wasn't seen well enough, up to
-/// `maxSeconds` or the end of the window), and average its appearance.
+/// Which of this tick's `boxes` is the tapped person, last seen at `box` (`prev[me]` when they were among the last
+/// tick's people `prev`): its index, -1 if they aren't seen, -2 if someone else's box vanished into theirs (the lab's
+/// `_follow`). Everyone keeps their own box, one to one, best overlap first (IoU > 0.4): following the best overlap
+/// alone let the tag slide onto a belayer stepping in front of the climber during the window.
+func follow(_ box: Box, _ prev: [Box], _ me: Int, _ boxes: [Box]) -> Int {
+    var M = boxes.map { npIoU($0, true, prev, true).v }
+    var got = [Int](repeating: -1, count: boxes.count)
+    while !prev.isEmpty {
+        var bi = 0, bq = 0, best = -Double.infinity
+        for i in boxes.indices { for q in prev.indices where M[i][q] > best { best = M[i][q]; bi = i; bq = q } }
+        if !(best > weak32(0.4)) { break }
+        got[bi] = bq
+        for q in prev.indices { M[bi][q] = -1 }
+        for i in boxes.indices { M[i][bq] = -1 }
+    }
+    if me >= 0 {
+        guard let m = got.firstIndex(of: me) else { return -1 }
+        let lost = prev.indices.filter { $0 != me && !got.contains($0) }  // last tick's people with no box now...
+        if !lost.isEmpty && npSamePerson32(boxes[m], lost.map { prev[$0] }, 0.3).contains(true) {
+            return -2  // ...one of them vanished into the tapped person's box
+        }
+        return m
+    }
+    guard got.contains(-1) else { return -1 }  // unseen last tick: only someone nobody else's box continues
+    let ov = npIoU(box, true, boxes, true).v
+    let w = boxes.indices.map { got[$0] < 0 ? ov[$0] : 0.0 }
+    let m = argmax(w)
+    return w[m] > weak32(0.4) ? m : -1
+}
+
+/// The "tag climber" moment (lab tracker `tag`): pick the detection under the tap, follow it one to
+/// one (`follow`; stopping if someone merges into their box) through the window (longer than
+/// `seconds` if the body wasn't seen well enough, up to `maxSeconds` or the end of the window), and
+/// average its appearance.
 ///
 /// `window`: the ticks of the tag window in time order, each with its candidates (the app collects
 /// 1.5 s from the tap time: every tick until and including the first one >= 1.5 s after the first,
@@ -67,6 +98,7 @@ public func tag(window: [(t: Double, candidates: [Candidate])], point: SIMD2<Dou
     var box = frames[start].boxes[first]
     var picked = [(start, first)]
     var j = start
+    var prev = frames[start].boxes, me = first  // last tick's people, and which of them is the tapped one (-1: unseen)
 
     func evidence() -> Double {
         var seen = [Bool](repeating: false, count: Cands.R)
@@ -81,9 +113,11 @@ public func tag(window: [(t: Double, candidates: [Candidate])], point: SIMD2<Dou
         j += 1
         let b = frames[j].boxes
         if b.isEmpty { continue }
-        let ov = npIoU(box, true, b, true)
-        let m = argmax(ov.v)
-        if ov.v[m] > weak32(0.4) {
+        let m = follow(box, prev, me, b)
+        if m == -2 { break }  // the tapped person merged with someone: what was learned so far is theirs alone
+        prev = b
+        me = m
+        if m >= 0 {
             box = b[m]
             picked.append((j, m))
         }

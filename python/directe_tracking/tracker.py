@@ -100,6 +100,15 @@ class Config:
     transact: bool = False         # profile updates wait commit_s with no doubt; any doubt discards them
     commit_s: float = 5.0
     doubt_rival: float = 0.05      # a rival this close is a doubt
+    # One person, one track (docs/review/deep-dives/tracker-accuracy.md): this frame's people take over last frame's
+    # tracks, and those of people missed lately, one to one, best overlap first. Each taking its own best overlap let
+    # two people inherit one track: a climber coming out from behind someone who crossed in front of them became
+    # that person, "seen beside the climber", and could never take the lock again.
+    one_to_one: bool = True
+    # Two people stay two people through a loss too: while lost, nobody seen beside the locked climber for settle_s
+    # is re-acquired. Re-acquiring the best-looking person in view put 72% of the wrong-person frames of the synthetic
+    # bench's whole clips on a look-alike or belayer.
+    keep_apart: bool = True
 
 
 @dataclass
@@ -545,6 +554,9 @@ class TargetTracker:
         b, a, tg = self._tracks
         kb, ka, kt, kn, _ = self._kept
         age, is_t, bes = np.zeros(len(c)), np.zeros(len(c), bool), np.zeros(len(c))
+        if self.cfg.one_to_one:
+            self._assign(c, age, is_t, bes)
+            return (age, is_t, bes) if beside else (age, is_t)
         for i, box in enumerate(c.boxes):
             ov = iou(box, b) if len(b) else np.zeros(0)
             j = int(np.argmax(ov)) if len(ov) else -1
@@ -556,6 +568,32 @@ class TargetTracker:
                 if ov[j] > 0.3:
                     age[i], is_t[i], bes[i] = ka[j], kt[j], kn[j]
         return (age, is_t, bes) if beside else (age, is_t)
+
+    def _assign(self, c: Cands, age, is_t, bes) -> None:
+        """Config.one_to_one: this frame's people take over last frame's tracks (and those of people missed lately)
+        one to one, best overlap first (IoU > 0.3). A second box of someone already matched (IoU >= 0.5: the pose
+        and the segmentation boxes of one person) shares their track; anyone else unmatched is new. (Synthetic gym
+        SB160: a boulderer walking past in front of the climber.)"""
+        b, a, tg = self._tracks
+        kb, ka, kt, kn, _ = self._kept
+        B = np.concatenate([b.reshape(-1, 4), kb.reshape(-1, 4)])
+        A, T, N = np.concatenate([a, ka]), np.concatenate([tg, kt]), np.concatenate([self._beside, kn])
+        n = len(c)
+        if not n or not len(B):
+            return
+        M = np.array([iou(box, B) for box in c.boxes])
+        got = -np.ones(n, int)
+        while M.max() > 0.3:
+            i, j = np.unravel_index(int(np.argmax(M)), M.shape)
+            got[i] = j
+            M[i, :] = -1.0
+            M[:, j] = -1.0
+        for i in np.where(got < 0)[0]:
+            twin = [k for k in np.where(got >= 0)[0] if iou(c.boxes[k], c.boxes[i:i + 1])[0] >= 0.5]
+            if twin:
+                got[i] = got[twin[0]]
+        for i in np.where(got >= 0)[0]:
+            age[i], is_t[i], bes[i] = A[got[i]], T[got[i]], N[got[i]]
 
     def _carry(self, c: Cands, dt: float, chosen: int) -> None:
         age, is_t, bes = self._track_info(c, beside=True)
@@ -855,6 +893,9 @@ class TargetTracker:
         cents, hs = self._geometry(c)
         app = self.p.sim(c, cfg)
         app[self._implausible(c, hs, None) | self._vetoed(len(c))] = -1.0
+        if cfg.keep_apart:
+            _, _, bes = self._track_info(c, beside=True)
+            app[bes >= cfg.settle_s] = -1.0  # seen beside the locked climber: someone else
         best = int(np.argmax(app))
         if app[best] < cfg.reacquire_app:
             self._pending = None
@@ -918,10 +959,42 @@ def register(clip, dets) -> tuple[Profile, np.ndarray, int]:
     return tag(dets, clip.seed)
 
 
+def _follow(box: np.ndarray, prev: np.ndarray, me: int, boxes: np.ndarray) -> int:
+    """Which of this frame's `boxes` is the tapped person, last seen at `box` (`prev[me]` when they were among last
+    frame's people `prev`): its index, -1 if they aren't seen, -2 if someone else's box vanished into theirs.
+    Everyone keeps their own box, one to one, best overlap first (IoU > 0.4). Following the best overlap alone let
+    the tag slide onto a belayer stepping in front of the climber during the window and learn them as the climber
+    (synthetic gym SB105, SB107, SB108, SB113: a steep side camera sees the two stacked)."""
+    M = np.array([iou(b, prev) for b in boxes]).reshape(len(boxes), len(prev)) if len(prev) else np.zeros((len(boxes), 0))
+    got = -np.ones(len(boxes), int)
+    while M.size and M.max() > 0.4:
+        i, q = np.unravel_index(int(np.argmax(M)), M.shape)
+        got[i] = q
+        M[i, :] = -1.0
+        M[:, q] = -1.0
+    if me >= 0:
+        hit = np.where(got == me)[0]
+        if not len(hit):
+            return -1
+        m = int(hit[0])
+        lost = np.setdiff1d(np.arange(len(prev)), got[got >= 0])  # last frame's people with no box now...
+        lost = lost[lost != me]
+        if len(lost) and same_person(boxes[m], prev[lost], 0.3).any():
+            return -2  # ...one of them vanished into the tapped person's box: two people in one box from here on
+        return m
+    free = got < 0  # unseen last frame: only someone nobody else's box continues
+    if not free.any():
+        return -1
+    ov = np.where(free, iou(box, boxes), 0.0)
+    m = int(np.argmax(ov))
+    return m if ov[m] > 0.4 else -1
+
+
 def tag(dets, seed: tuple[float, float, float], seconds: float = 1.5, max_seconds: float = 5.0
         ) -> tuple[Profile, np.ndarray, int]:
     """The "tag climber" moment: pick the detection under the tap, follow it by overlap for a
-    moment (longer if the body wasn't seen well enough), and average its appearance.
+    moment (longer if the body wasn't seen well enough), and average its appearance. Following is one to one
+    (`_follow`), and stops when someone merges into the tapped person's box.
     Returns (profile, box, frame index)."""
     t_seed, fx, fy = seed
     W, H = dets.size
@@ -950,15 +1023,18 @@ def tag(dets, seed: tuple[float, float, float], seconds: float = 1.5, max_second
         seen = dets.fvalid[picked].any(axis=0)
         return float(appearance.WEIGHTS[seen].sum())
 
+    prev, me = dets.boxes[sl], k  # last frame's people, and which of them is the tapped one (-1: not seen)
     while j + 1 < len(dets) and (dets.t[j + 1] - dets.t[start] <= seconds or
                                  (evidence() < 0.85 and dets.t[j + 1] - dets.t[start] <= max_seconds)):
         j += 1
         sl = dets.frame(j)
         if len(dets.boxes[sl]) == 0:
             continue
-        ov = iou(box, dets.boxes[sl])
-        m = int(np.argmax(ov))
-        if ov[m] > 0.4:
+        m = _follow(box, prev, me, dets.boxes[sl])
+        if m == -2:
+            break  # the tapped person merged with someone: what was learned so far is theirs alone
+        prev, me = dets.boxes[sl], m
+        if m >= 0:
             box = dets.boxes[sl][m]
             picked.append(sl.start + m)
     F, V = dets.feat[picked], dets.fvalid[picked]
@@ -1081,6 +1157,45 @@ def selftest() -> None:
         assert on(s, 500, y), f"didn't keep the climber: {s.state} {s.box}"
         return False
 
+    def crossing(cfg) -> bool:
+        """A passer-by (another colour) walks across in front of the climber, hiding them for a few frames. True if
+        the lock is back on the climber within 0.5 s of them reappearing and stays there."""
+        trk = tracker(cfg)
+        back = None
+        for k in range(1, 60):
+            t = k * 0.1
+            px = 500 - 2 * H + 0.1 * H * k  # 1 body height/s
+            hidden = abs(px - 500) < 0.35 * H
+            c = cands(([] if hidden else [(500, 600)]) + [(px, 600)])
+            c.feats[-1] = 0.0
+            c.feats[-1, :, 7] = 1.0
+            s = trk.step(t, c)
+            if back is None and not hidden and px > 500:
+                back = t
+            if back is not None and t >= back + 0.5 and not on(s, 500, 600):
+                return False
+        return True
+
+    def apart(cfg) -> bool:
+        """An identical look-alike climbs 1.3 body heights beside the climber; the climber is hidden for 4 s (the
+        lock is lost after 2). True if the lock went to the look-alike."""
+        trk = tracker(cfg)
+        for k in range(1, 70):
+            t = k * 0.1
+            s = trk.step(t, cands(([] if 2.0 <= t < 6.0 else [(500, 600)]) + [(500 - 1.3 * H, 600)]))
+            if on(s, 500 - 1.3 * H, 600):
+                return True
+        assert on(s, 500, 600), f"didn't get the climber back: {s.state} {s.box}"
+        return False
+
+    assert not crossing(Config(one_to_one=False)), "test is too easy: the climber came back without one-to-one tracks"
+    assert crossing(Config()), "a passer-by crossing in front took over the climber's track"
+    assert apart(Config(keep_apart=False)), "test is too easy: the look-alike wasn't re-acquired anyway"
+    assert not apart(Config()), "a look-alike seen beside the climber was re-acquired while the climber was hidden"
+    # The tag window follows the tapped person one to one, and stops once someone merges into their box.
+    me_, other_ = np.array([0, 0, 60, 200.0]), np.array([50, 0, 110, 200.0])
+    assert _follow(me_, np.array([me_, other_]), 0, np.array([other_ - [8, 0, 8, 0], me_])) == 1, "followed the wrong one"
+    assert _follow(me_, np.array([me_, other_]), 0, np.array([[5, 0, 100, 200.0]])) == -2, "missed a merge"
     off = Config(switch_margin=-1.0, track_keep_s=0.0)
     assert stacked(off, True) and stacked(off, False), "test is too easy: the look-alike never took the lock"
     assert stacked(Config(track_keep_s=0.0), True), "test is too easy: without remembering missed people it held anyway"
