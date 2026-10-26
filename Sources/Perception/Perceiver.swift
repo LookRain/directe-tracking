@@ -62,6 +62,9 @@ public final class Perceiver {
 
     let pool = BufferPool()
 
+    /// `find` uses the focus window's mask model when there is one (the Precise preset's pack), not the small one.
+    public var findWithFocusSeg = false
+
     public init(models: PerceptionModels) { self.models = models }
 
     /// lab _window(cx, cy, side, W, H): a square window of `side` (at most the frame's short side),
@@ -111,7 +114,7 @@ public final class Perceiver {
         // The three passes don't depend on each other: run them together, so one's CPU work (letterbox, NMS, masks)
         // overlaps another's time on the Neural Engine. Same results as one after another.
         let masks = self.masks && models.focusSeg != nil
-        let finder: SegNet? = masks ? models.focusSeg : (find ? models.secondSeg : nil)
+        let finder: SegNet? = masks ? models.focusSeg : (find ? (findWithFocusSeg ? models.focusSeg ?? models.secondSeg : models.secondSeg) : nil)
         // finding only, in a window wider than the network: its middle 640 px at full resolution (a far climber
         // shrunk by the tag window's 960 -> 640 is too small for the small mask model)
         let fw = !masks && finder != nil && x1 - x0 > 640 ? 640 : 0

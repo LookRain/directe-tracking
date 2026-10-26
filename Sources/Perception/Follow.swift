@@ -17,6 +17,10 @@ import TrackerCore
 public final class MotionFollow {
     public var maxCoastS = 4.0, bodyPx = 40.0, nccMin: Float = 0.45, nccStill: Float = 0.7, aliveS = 1.5
     public var maxStep = 0.6, search = 1.0
+    /// Only for a climber shorter than this (px; the anchor's box): a near climber the detector misses has usually
+    /// left (an exit, behind someone), and following there added wrong-person and false-lock checks on the synthetic
+    /// bench's exits and run-outs (far-climbers.md).
+    public var maxHeight = Double.infinity
     public private(set) var proposed = 0, accepted = 0
 
     /// A grey region of the frame (origin ox, oy); `at` takes frame coordinates, clamped into the region.
@@ -49,7 +53,7 @@ public final class MotionFollow {
         proposal = nil
         guard shiftKnown else { anchor = nil; return nil }  // bumped: the climber may be anywhere
         if let b = box, let last { box = b.offset(offset - last.offset) }
-        guard let a = anchor, let b = box, let last, t - a.t <= maxCoastS else { return nil }
+        guard let a = anchor, let b = box, let last, t - a.t <= maxCoastS, a.box.height < maxHeight else { return nil }
         if boxes.contains(where: { predicted.iou($0) >= 0.3 }) { return nil }  // the detector has someone there
         let h = b.height, w = b.width
         let r = search * h + 2
