@@ -85,9 +85,10 @@ public final class Perceiver {
     /// `wide: false` skips the whole-frame pass (only with a focus window): people outside the window go unseen.
     /// `ahead`: this frame's whole-frame pass, started earlier with `startWide` (same results; the Neural Engine runs it
     /// while the CPU is busy between passes).
-    /// `find`: with `masks` off, still run the focus window's mask model to find people (not to describe them: no body
-    /// outlines, as with masks off). The tag window does: a far climber 30-70 px tall is often found only by the mask
-    /// model (the lab runner always runs it; without it the tag failed on 7 of 10 tiny synthetic clips,
+    /// `find`: with `masks` off, still run a mask model in the focus window to find people (not to describe them: no
+    /// body outlines, as with masks off): the second chance's small one, which the app always has (the focus window's
+    /// isn't downloaded while masks are off). The tag window does: a far climber 30-70 px tall is often found only by
+    /// a mask model (the lab runner always runs one; without it the tag failed on 7 of 10 tiny synthetic clips,
     /// docs/review/deep-dives/far-climbers.md).
     public func perceive(_ frame: CVPixelBuffer, focus: Box?, wide: Bool = true, ahead: WidePass? = nil,
                          find: Bool = false) throws -> [Candidate] {
@@ -109,21 +110,29 @@ public final class Perceiver {
         let crop = view.crop(x0, y0, x1 - x0, y1 - y0)
         // The three passes don't depend on each other: run them together, so one's CPU work (letterbox, NMS, masks)
         // overlaps another's time on the Neural Engine. Same results as one after another.
-        let masks = (self.masks || find) && models.focusSeg != nil
+        let masks = self.masks && models.focusSeg != nil
+        let finder: SegNet? = masks ? models.focusSeg : (find ? models.secondSeg : nil)
+        // finding only, in a window wider than the network: its middle 640 px at full resolution (a far climber
+        // shrunk by the tag window's 960 -> 640 is too small for the small mask model)
+        let fw = !masks && finder != nil && x1 - x0 > 640 ? 640 : 0
+        let fx0 = fw > 0 ? (x0 + x1 - fw) / 2 : x0, fy0 = fw > 0 ? (y0 + y1 - fw) / 2 : y0
         let (wide, (fp, fs)) = try concurrently(widePass) {
             let canvas = try clock.time("focus canvas") { try Canvas(crop, pool: pool) }  // the lab letterboxes the window once per model; same pixels
             return try concurrently({ try self.clock.time("focus pose") { try self.models.focusPose.detect(canvas) } },
-                                    { masks ? try self.clock.time("focus seg") { try self.models.focusSeg!.detect(canvas) } : [] })
+                                    { try finder.map { net in try self.clock.time(masks ? "focus seg" : "find seg") {
+                                        try net.detect(fw > 0 ? try Canvas(view.crop(fx0, fy0, fw, fw), pool: self.pool) : canvas)
+                                    } } ?? [] })
         }
         calls["pose", default: 0] += doWide ? 2 : 1
-        if masks { calls["seg", default: 0] += 1 }
+        if finder != nil { calls["seg", default: 0] += 1 }
         let off = SIMD4<Float>(Float(x0), Float(y0), Float(x0), Float(y0))
         let poses = fp.map { d in
             PoseDet(box: d.box + off, conf: d.conf,
                     kpts: d.kpts.map { Keypoint(x: $0.x + Float(x0), y: $0.y + Float(y0), conf: $0.conf) })
         }
-        let segBoxes = fs.map { $0.box + off }
-        let segPolys = fs.map { d in d.poly.map { SIMD2<Double>(Double($0.x) + Double(x0), Double($0.y) + Double(y0)) } }
+        let soff = SIMD4<Float>(Float(fx0), Float(fy0), Float(fx0), Float(fy0))
+        let segBoxes = fs.map { $0.box + soff }
+        let segPolys = fs.map { d in d.poly.map { SIMD2<Double>(Double($0.x) + Double(fx0), Double($0.y) + Double(fy0)) } }
         var people = Self.merge(poses, segBoxes, segPolys, outlines: self.masks)
         // wide-pass people not already seen in the focus window
         for d in wide {
