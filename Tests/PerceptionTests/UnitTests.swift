@@ -122,3 +122,22 @@ import Testing
         #expect(sq.canvasW == 640 && sq.canvasH == 640 && sq.left == 0)
     }
 }
+
+/// Masks used only to find people (`Perceiver.perceive(find:)`, the tag window with masks off): someone only the mask
+/// model sees (a far climber) still becomes a person, and nobody keeps an outline (describe() works as with masks off).
+@Suite struct FindWithMasks {
+    let poly: [SIMD2<Double>] = [SIMD2(10, 10), SIMD2(20, 10), SIMD2(20, 40), SIMD2(10, 40)]
+    let pose = PoseDet(box: SIMD4(300, 300, 360, 460), conf: 0.8, kpts: [])
+
+    @Test func maskOnlyPersonIsFound() {
+        let found = Perceiver.merge([pose], [SIMD4(10, 10, 20, 40)], [poly], outlines: false)
+        #expect(found.count == 2)
+        #expect(found[1].box == SIMD4(10, 10, 20, 40) && found[1].kpts.isEmpty)
+        #expect(found.allSatisfy { $0.poly == nil })
+    }
+
+    @Test func outlinesKeptWithMasksOn() {
+        let found = Perceiver.merge([pose], [SIMD4(10, 10, 20, 40)], [poly])
+        #expect(found.count == 2 && found[1].poly == poly)
+    }
+}

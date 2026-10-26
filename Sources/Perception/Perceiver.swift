@@ -85,11 +85,17 @@ public final class Perceiver {
     /// `wide: false` skips the whole-frame pass (only with a focus window): people outside the window go unseen.
     /// `ahead`: this frame's whole-frame pass, started earlier with `startWide` (same results; the Neural Engine runs it
     /// while the CPU is busy between passes).
-    public func perceive(_ frame: CVPixelBuffer, focus: Box?, wide: Bool = true, ahead: WidePass? = nil) throws -> [Candidate] {
-        try withPixels(frame) { view in try perceive(view, focus: focus, wide: wide, ahead: ahead) }
+    /// `find`: with `masks` off, still run the focus window's mask model to find people (not to describe them: no body
+    /// outlines, as with masks off). The tag window does: a far climber 30-70 px tall is often found only by the mask
+    /// model (the lab runner always runs it; without it the tag failed on 7 of 10 tiny synthetic clips,
+    /// docs/review/deep-dives/far-climbers.md).
+    public func perceive(_ frame: CVPixelBuffer, focus: Box?, wide: Bool = true, ahead: WidePass? = nil,
+                         find: Bool = false) throws -> [Candidate] {
+        try withPixels(frame) { view in try perceive(view, focus: focus, wide: wide, ahead: ahead, find: find) }
     }
 
-    func perceive(_ view: PixelView, focus: Box?, wide doWide: Bool = true, ahead: WidePass? = nil) throws -> [Candidate] {
+    func perceive(_ view: PixelView, focus: Box?, wide doWide: Bool = true, ahead: WidePass? = nil,
+                  find: Bool = false) throws -> [Candidate] {
         let widePass = { () throws -> [PoseDet] in
             guard doWide || focus == nil else { return [] }
             if let ahead { return try ahead.wait() }
@@ -103,7 +109,7 @@ public final class Perceiver {
         let crop = view.crop(x0, y0, x1 - x0, y1 - y0)
         // The three passes don't depend on each other: run them together, so one's CPU work (letterbox, NMS, masks)
         // overlaps another's time on the Neural Engine. Same results as one after another.
-        let masks = self.masks && models.focusSeg != nil
+        let masks = (self.masks || find) && models.focusSeg != nil
         let (wide, (fp, fs)) = try concurrently(widePass) {
             let canvas = try clock.time("focus canvas") { try Canvas(crop, pool: pool) }  // the lab letterboxes the window once per model; same pixels
             return try concurrently({ try self.clock.time("focus pose") { try self.models.focusPose.detect(canvas) } },
@@ -118,7 +124,7 @@ public final class Perceiver {
         }
         let segBoxes = fs.map { $0.box + off }
         let segPolys = fs.map { d in d.poly.map { SIMD2<Double>(Double($0.x) + Double(x0), Double($0.y) + Double(y0)) } }
-        var people = Self.merge(poses, segBoxes, segPolys)
+        var people = Self.merge(poses, segBoxes, segPolys, outlines: self.masks)
         // wide-pass people not already seen in the focus window
         for d in wide {
             let b = d.box
@@ -148,7 +154,9 @@ public final class Perceiver {
 
     /// Pose boxes take the mask they overlap best (IoU >= 0.5); masks no pose box claims and that
     /// aren't the same person as one (containment, IoU 0.3) join as mask-only people.
-    static func merge(_ poses: [PoseDet], _ segBoxes: [SIMD4<Float>], _ segPolys: [[SIMD2<Double>]]) -> [Person] {
+    /// `outlines: false` (masks only used to find people): nobody keeps a mask outline.
+    static func merge(_ poses: [PoseDet], _ segBoxes: [SIMD4<Float>], _ segPolys: [[SIMD2<Double>]],
+                      outlines: Bool = true) -> [Person] {
         var people: [Person] = []
         var used = Set<Int>()
         for d in poses {
@@ -167,6 +175,9 @@ public final class Perceiver {
             if poses.isEmpty || !poses.contains(where: { toBox(segBoxes[j]).samePerson(toBox($0.box), iouThreshold: 0.3) }) {
                 people.append(Person(box: segBoxes[j], kpts: [], poly: segPolys[j]))
             }
+        }
+        if !outlines {
+            for i in people.indices { people[i].poly = nil }
         }
         return people
     }
