@@ -211,6 +211,11 @@ public final class Perceiver {
         return out
     }
 
+    /// Describe people known only by their boxes (no keypoints, no outline), e.g. `MotionFollow`'s proposal.
+    public func candidates(boxes: [Box], in frame: CVPixelBuffer) throws -> [Candidate] {
+        try withPixels(frame) { view in try describe(view, boxes.map { Person(box: toF($0), kpts: [], poly: nil) }) }
+    }
+
     // MARK: second chance
 
     /// lab second_chance(): nobody at the prediction `pb`, so look again at ~2x (pose + masks) in a
