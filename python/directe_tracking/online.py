@@ -134,7 +134,8 @@ def _describe(m: Models, frame: np.ndarray, boxes, kpts, polys) -> Cands:
     return Cands(np.array(boxes, np.float32).reshape(-1, 4), feats, valids, embs)
 
 
-def second_chance(m: Models, frame: np.ndarray, pb: np.ndarray, c: Cands, mot: motion.Evidence | None) -> Cands:
+def second_chance(m: Models, frame: np.ndarray, pb: np.ndarray, c: Cands, mot: motion.Evidence | None,
+                  floor: float = SC_MIN) -> Cands:
     """Nobody at the prediction: look again at ~2x (pose + masks) and add at most one person at the
     prediction, if the wall's motion supports it (static boxes on holds and rock are what the
     larger view hallucinates). Identity is still the tracker's call."""
@@ -142,7 +143,7 @@ def second_chance(m: Models, frame: np.ndarray, pb: np.ndarray, c: Cands, mot: m
     h = float(pb[3] - pb[1])
     if h <= 0 or (len(c) and (iou(pb, c.boxes) >= 0.3).any()):
         return c
-    x0, y0, x1, y1 = _window((pb[0] + pb[2]) / 2, (pb[1] + pb[3]) / 2, float(np.clip(SC_K * h, SC_MIN, min(W, H))), W, H)
+    x0, y0, x1, y1 = _window((pb[0] + pb[2]) / 2, (pb[1] + pb[3]) / 2, float(np.clip(SC_K * h, floor, min(W, H))), W, H)
     s = 640 / (y1 - y0)
     crop = cv2.resize(frame[y0:y1, x0:x1], (640, 640), interpolation=cv2.INTER_LINEAR if s > 1 else cv2.INTER_AREA)
     fb, _, fk = m.pose([crop])[0]
@@ -208,6 +209,10 @@ def run(clip: Clip, cfg: Config | None = None, fps: float = 10, end: float | Non
     W = H = None
     cam = CameraMotion()
     mot = motion.Evidence(moving_camera=clip.handheld) if run_opts.get("motion_confirm") else None
+    fol = None
+    if run_opts.get("motion_follow"):   # far climbers: keep following through detector misses (follow.py)
+        from .follow import MotionFollow
+        fol = MotionFollow(run_opts["motion_follow"], max_coast_s=float(run_opts.get("follow_s", 4.0)))
     m.plain_reid = bool(run_opts.get("plain_reid"))
     for fi, t, frame in frames:
         H, W = frame.shape[:2]
@@ -248,10 +253,16 @@ def run(clip: Clip, cfg: Config | None = None, fps: float = 10, end: float | Non
                 focus = hint
         c = perceive(m, frame, focus)
         if run_opts.get("second_chance"):
-            c = second_chance(m, frame, pb, c, mot)
+            c = second_chance(m, frame, pb, c, mot, float(run_opts.get("sc_min", SC_MIN)))
+        if fol is not None:
+            nb = fol.propose(t, frame, shift, cam_conf, pb, c.boxes)
+            if nb is not None:
+                c = c.concat(_describe(m, frame, [nb.astype(np.float32)], [np.zeros((17, 3), np.float32)], [None]))
         if referee is not None:
             trk.exclude = referee.tick(t, c.boxes, trk, prev, lambda frame=frame: frame, trk.rival_gap)
         s = trk.step(t, c)
+        if fol is not None:
+            fol.after(t, frame, s.state, s.box, c.boxes[s.chosen] if s.chosen >= 0 else None)
         if referee is not None and s.state == LOCKED and s.app >= 0.85 and trk.steady():
             referee.note_confident(lambda frame=frame: frame, s.box, t)
         prev = s
@@ -265,6 +276,8 @@ def run(clip: Clip, cfg: Config | None = None, fps: float = 10, end: float | Non
     if referee is not None:
         out.with_suffix(".log.json").write_text(json.dumps(referee.log, indent=0, default=str))
     calls = {k: round(v / max(len(T), 1), 2) for k, v in m.calls.items()}
+    if fol is not None:
+        calls["follow"] = fol.stats
     print(f"[online] {clip.id} {pipe.name}: {len(T)} ticks in {time.time() - t0:.0f} s; calls per tick {calls}")
     return {"ticks": len(T), "calls_per_tick": calls}
 
@@ -325,7 +338,17 @@ VARIANTS = {
                     "plain_reid": True, "reid_lo": 0.47, "reid_hi": 0.78, "negatives": True, "transact": True,
                     "ground_latch": True, "ground_handheld": True, "tiein_s": 60.0, "own_keep": 0.4},
 }
-RUNNER_KEYS = {"lost_focus", "second_chance", "motion_confirm", "plain_reid", "ground_handheld"}
+# far climbers (deep dive far-climbers.md): follow through detector misses by continuity; a smaller second-chance
+# window floor (more upscaling for tiny climbers)
+_COMBO = VARIANTS["combo"]
+VARIANTS.update({
+    "combo_follow": {**_COMBO, "motion_follow": "ncc"},
+    "combo_follow_blob": {**_COMBO, "motion_follow": "blob"},
+    "combo_sc128": {**_COMBO, "sc_min": 128.0},
+    "combo_sc128_follow": {**_COMBO, "sc_min": 128.0, "motion_follow": "ncc"},
+})
+RUNNER_KEYS = {"lost_focus", "second_chance", "motion_confirm", "plain_reid", "ground_handheld", "motion_follow",
+               "follow_s", "sc_min"}
 
 
 def _stamp(cfg: Config, run_opts: dict, referee) -> dict:

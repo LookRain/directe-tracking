@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +13,7 @@ import numpy as np
 from . import appearance, pipeline, video
 from .clips import Clip, data_root
 
+DEVICE = os.environ.get("DIRECTE_DEVICE", "mps")  # "cpu" runs beside a GPU job (Blender) without starving it
 DEFAULT_MODEL = "yolo26m-pose.pt"  # the "full" pipeline; see lab/pipeline.py
 
 
@@ -32,7 +34,7 @@ class Detector:
     def __call__(self, frames: list[np.ndarray]) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
         """Per frame: boxes[N,4] xyxy, conf[N], kpts[N,17,3]."""
         results = self.model.predict(frames, imgsz=self.imgsz, conf=self.conf, classes=[0],
-                                     device="mps", verbose=False)
+                                     device=DEVICE, verbose=False)
         out = []
         for r in results:
             boxes = r.boxes.xyxy.cpu().numpy().astype(np.float32)

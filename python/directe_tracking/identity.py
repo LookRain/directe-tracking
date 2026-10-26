@@ -44,7 +44,7 @@ class Segmenter:
     def __call__(self, frames: list[np.ndarray]) -> list[tuple[np.ndarray, list[np.ndarray]]]:
         """Per frame: (boxes[N,4], polygons) for people."""
         out = []
-        for r in self.model.predict(frames, imgsz=self.imgsz, conf=0.2, classes=[0], device="mps",
+        for r in self.model.predict(frames, imgsz=self.imgsz, conf=0.2, classes=[0], device=detect.DEVICE,
                                     verbose=False, retina_masks=False):
             boxes = r.boxes.xyxy.cpu().numpy().astype(np.float32)
             polys = [p.astype(np.float32) for p in r.masks.xy] if r.masks is not None else []
@@ -56,7 +56,7 @@ class Embedder:
     def __init__(self):
         from boxmot.reid.core.runtime import ReID
 
-        self.reid = ReID(weights=data_root() / "models" / pipeline.current().reid, device="mps")
+        self.reid = ReID(weights=data_root() / "models" / pipeline.current().reid, device=detect.DEVICE)
 
     def __call__(self, crops: list[np.ndarray]) -> np.ndarray:
         if not crops:
