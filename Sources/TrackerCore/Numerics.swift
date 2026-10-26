@@ -211,6 +211,19 @@ func npSamePerson32(_ a: Box, _ bs: [Box], _ thr: Double) -> [Bool] {
     }
 }
 
+/// The lab's `_gap`: the smallest gap from float32 box `a` to anyone else among float32 `bs` (not a second box of `a`,
+/// `npSamePerson32`), in `a`'s heights; infinity when there is nobody else. Float32 differences, float64 distance.
+func gap(_ a: Box, _ bs: [Box]) -> Double {
+    let same = npSamePerson32(a, bs, 0.5)
+    var best = Double.infinity
+    for (i, b) in bs.enumerated() where !same[i] {
+        let gx = max(0, f32(b.x0 - a.x1), f32(a.x0 - b.x1))
+        let gy = max(0, f32(b.y0 - a.y1), f32(a.y0 - b.y1))
+        best = min(best, hypot(gx, gy))
+    }
+    return best / max(f32(a.y1 - a.y0), 1.0)
+}
+
 extension Box {
     /// The box with float32 coordinates (how the lab stores candidate boxes).
     var float32: Box { Box(f32(x0), f32(y0), f32(x1), f32(y1)) }

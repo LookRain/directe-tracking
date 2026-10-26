@@ -45,7 +45,8 @@ from directe_tracking import appearance  # noqa: E402
 from directe_tracking import tracker as T  # noqa: E402
 
 OUT = REPO / "Tests/TrackerCoreTests/Fixtures"
-COMBO = dict(learn_gate=True, fall_size=True, negatives=True, transact=True, ground_latch=True, tiein_s=60.0)
+COMBO = dict(learn_gate=True, fall_size=True, negatives=True, transact=True, ground_latch=True, tiein_s=60.0,
+             own_keep=0.4)
 STATE_CODE = {T.LOCKED: 0, T.UNCERTAIN: 1, T.LOST: 2}
 NO_ACTION = (-1, -1, 0)
 
@@ -359,6 +360,19 @@ def scenes() -> list[Case]:
                                                      "no_keep": {"track_keep_s": 0.0}},
                          desc="a look-alike a body length below on the next route (steep side view, boxes overlap): "
                          "missed detections, colour and re-ID wobbles, a second box of the climber"))
+
+    turned = unit(EA + 1.62 * axis(0.0, 0.0, 0.0, 1.0))  # re-ID cosine ~0.53 to the climber: appearance ~0.55
+    frames = []
+    for k in range(70):
+        t = k * 0.1
+        y = 1200 - 0.2 * SB * t
+        dip = 2.5 <= t < 3.5 or 5.0 <= t < 5.6
+        ps = [person(500, y, turned if dip else EA), person(500 + 3 * SB, 1200, ED)]
+        if t >= 4.0:
+            ps.append(person(500 + 0.8 * SB, y + 0.1 * SB, EB))  # someone else comes to stand right beside them
+        frames.append((k * 0.1, ps))
+    out.append(synthetic("dip", frames, desc="the climber's appearance dips below the floor for 1 s with nobody near "
+                         "(own_keep holds the lock), then again with someone right beside them (it doesn't)"))
     return out
 
 

@@ -319,11 +319,11 @@ VARIANTS = {
     "combo": {"learn_gate": True, "fall_size": True, "lost_focus": True,
               "second_chance": True, "motion_confirm": True,
               "negatives": True, "transact": True,
-              "ground_latch": True, "ground_handheld": True, "tiein_s": 60.0},
+              "ground_latch": True, "ground_handheld": True, "tiein_s": 60.0, "own_keep": 0.4},
     "combo_plain": {"learn_gate": True, "fall_size": True, "lost_focus": True,
                     "second_chance": True, "motion_confirm": True,
                     "plain_reid": True, "reid_lo": 0.47, "reid_hi": 0.78, "negatives": True, "transact": True,
-                    "ground_latch": True, "ground_handheld": True, "tiein_s": 60.0},
+                    "ground_latch": True, "ground_handheld": True, "tiein_s": 60.0, "own_keep": 0.4},
 }
 RUNNER_KEYS = {"lost_focus", "second_chance", "motion_confirm", "plain_reid", "ground_handheld"}
 

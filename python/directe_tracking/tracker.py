@@ -109,6 +109,16 @@ class Config:
     # is re-acquired. Re-acquiring the best-looking person in view put 72% of the wrong-person frames of the synthetic
     # bench's whole clips on a look-alike or belayer.
     keep_apart: bool = True
+    # The lock's own track keeps it through an appearance dip (docs/review/deep-dives/tracker-accuracy.md, misses): the
+    # climber's appearance dips below the relative floor on their own track (median 0.56 vs ~0.71), and the lock let go
+    # of a climber still in view. Held on that one-to-one track for settle_s, with nobody within own_gap body heights
+    # of it for own_alone_s and where the climber was predicted (motion >= own_motion), it needs only own_keep. Such
+    # frames don't move app_level. Without the "nobody near" history a belayer or look-alike who took over the track
+    # at a merge kept the lock too (0.5 s: dev belayer frames 58 -> 173). On in the app's settings (combo).
+    own_keep: float = -1.0         # appearance floor for the lock's own track while nobody is near (< 0: off)
+    own_alone_s: float = 1.0
+    own_gap: float = 0.5           # body heights
+    own_motion: float = 0.6
 
 
 @dataclass
@@ -396,6 +406,7 @@ class TargetTracker:
         self._tracks = (np.zeros((0, 4)), np.zeros(0), np.zeros(0, bool))  # last frame: boxes, age (s), is the target
         self._beside = np.zeros(0)  # ...and how long each was seen beside the locked climber (s)
         self._own_held = 0.0        # how long the lock has been locked on the track it follows now (s)
+        self._crowd_t = t           # last time someone was within own_gap of the climber's track
         # people the detector missed lately: box, age, target, time beside the climber, time unseen (s)
         self._kept = (np.zeros((0, 4)), np.zeros(0), np.zeros(0, bool), np.zeros(0), np.zeros(0))
         if self.cfg.ground_latch and frame_h is not None and box[3] >= frame_h - 3:
@@ -607,6 +618,11 @@ class TargetTracker:
                 if sep:
                     is_t |= same_person(c.boxes[chosen], c.boxes)  # a second box of the climber is on their track
                     bes = bes + dt * ~is_t                          # everyone else was seen beside them
+        if self.cfg.own_keep >= 0:  # the climber's track: the lock, else the box on their track, else the prediction
+            tb = c.boxes[chosen] if chosen >= 0 else (c.boxes[int(np.argmax(is_t))] if len(c) and is_t.any()
+                                                      else self.predicted_box().astype(np.float32))
+            if _gap(tb, c.boxes) <= self.cfg.own_gap:
+                self._crowd_t = self.t
         if sep and self.cfg.track_keep_s > 0:
             self._keep(c, dt, chosen)
         self._tracks = (c.boxes.copy() if len(c) else np.zeros((0, 4)), age, is_t)
@@ -688,18 +704,19 @@ class TargetTracker:
         floor = max(cfg.app_min, cfg.app_rel * self.app_level)
         if self.t < self.trust_until:
             floor = cfg.app_min  # referee just confirmed them: drop the relative bar, keep the basic one
+        own = self._own_keep(c, app, floor, motion)  # below the floor, but the lock's own track with nobody near
         score = 0.55 * np.maximum(app, 0) + 0.30 * motion + 0.15 * size
         score -= 0.005 * (sources == "spotter")  # ties go to the recording view (more pixels)
         bad = self._implausible(c, hs, h_ref) | self._vetoed(len(c))
         if cfg.jump_guard:
             jump = self._jumps(pred, since, dt, c, cents, h_ref)
-            ok = known & (app >= floor) & (motion >= 0.05) & ~bad
+            ok = known & ((app >= floor) | own) & (motion >= 0.05) & ~bad
             if ok.any() and jump[int(np.argmax(np.where(ok, score, -1)))] and score[ok].max() >= cfg.accept:
                 self.jump_t = self.t  # the guard overruled the tracker's pick: worth asking the referee
             if cfg.switch_margin >= 0:  # (not a jump: no doubt, no referee; a look-alike beside the climber
                 jump |= self._switches(c, score, ok & ~jump, ~bad)  # would make every frame one)
             bad |= jump
-        score[~known | (app < floor) | (motion < 0.05) | bad] = 0.0
+        score[~known | ((app < floor) & ~own) | (motion < 0.05) | bad] = 0.0
         if score.max() < cfg.accept:
             # Nobody recognisable. Someone whose appearance couldn't be judged at all is
             # acceptable only right where we expect the climber.
@@ -717,12 +734,23 @@ class TargetTracker:
             self.fall_t = self.t
         if known[best] and app[best] >= cfg.adapt_app and not ambiguous and sources[best] == "view" and self.steady():
             self.p.learn(c, best, self.t, cfg)
-        if known[best]:
+        if known[best] and not own[best]:
             self.app_level = 0.95 * self.app_level + 0.05 * float(app[best])
         self.state = LOCKED
         self.t_seen = self.t
         return Step(LOCKED, c.boxes[best].copy(), self.v.copy(), best, float(app[best]), float(score[best]),
                     str(sources[best]))
+
+    def _own_keep(self, c: Cands, app, floor: float, motion) -> np.ndarray:
+        """Candidates below the floor that keep the lock as its own track, nobody near (Config.own_keep)."""
+        cfg = self.cfg
+        keep = np.zeros(len(c), bool)
+        if cfg.own_keep < 0 or self._own_held < cfg.settle_s or self.t - self._crowd_t < cfg.own_alone_s:
+            return keep
+        _, is_t = self._track_info(c)
+        for k in np.where(is_t & (app >= cfg.own_keep) & (app < floor) & (motion >= cfg.own_motion))[0]:
+            keep[k] = _gap(c.boxes[k], c.boxes) > cfg.own_gap
+        return keep
 
     def _vetoed(self, n: int) -> np.ndarray:
         """Referee vetoes apply to the recording-view candidates (the first len(exclude))."""
@@ -923,6 +951,16 @@ def iou(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     inter = np.clip(x1 - x0, 0, None) * np.clip(y1 - y0, 0, None)
     area = lambda x: (x[..., 2] - x[..., 0]) * (x[..., 3] - x[..., 1])  # noqa: E731
     return inter / np.maximum(area(a) + area(b) - inter, 1e-6)
+
+
+def _gap(a: np.ndarray, b: np.ndarray) -> float:
+    """Smallest gap from box a [4] to anyone else among boxes b [N,4] (not a second box of a), in a's heights."""
+    others = b[~same_person(a, b)] if len(b) else b
+    if not len(others):
+        return float("inf")
+    gx = np.maximum.reduce([np.zeros(len(others)), others[:, 0] - a[2], a[0] - others[:, 2]])
+    gy = np.maximum.reduce([np.zeros(len(others)), others[:, 1] - a[3], a[1] - others[:, 3]])
+    return float(np.hypot(gx, gy).min()) / max(float(a[3] - a[1]), 1.0)
 
 
 def same_person(a: np.ndarray, b: np.ndarray, iou_thr: float = 0.5) -> np.ndarray:
@@ -1188,6 +1226,26 @@ def selftest() -> None:
         assert on(s, 500, 600), f"didn't get the climber back: {s.state} {s.box}"
         return False
 
+    def dip(cfg, beside: bool) -> bool:
+        """The climber's colour reads poorly for 1 s (~0.6 against a floor of ~0.75), alone or with someone else (another
+        colour) standing just beside them. True if the lock held on the climber throughout."""
+        trk = tracker(cfg)
+        held = True
+        for k in range(1, 50):
+            t = k * 0.1
+            c = cands([(500, 600)] + ([(500 + 0.9 * H, 600)] if beside else []))
+            if beside:
+                c.feats[1] = 0.0
+                c.feats[1, :, 7] = 1.0
+            if 2.0 <= t < 3.0:
+                c.feats[0] = 0.0
+                c.feats[0, :, :6] = 1.0 / 6
+            held &= on(trk.step(t, c), 500, 600)
+        return held
+
+    assert not dip(Config(), False), "test is too easy: the lock held through the dip without own_keep"
+    assert dip(Config(own_keep=0.4), False), "the climber's own track, nobody near, let go through an appearance dip"
+    assert not dip(Config(own_keep=0.4), True), "own_keep held the lock with someone right beside the climber"
     assert not crossing(Config(one_to_one=False)), "test is too easy: the climber came back without one-to-one tracks"
     assert crossing(Config()), "a passer-by crossing in front took over the climber's track"
     assert apart(Config(keep_apart=False)), "test is too easy: the look-alike wasn't re-acquired anyway"
@@ -1201,6 +1259,8 @@ def selftest() -> None:
     assert stacked(Config(track_keep_s=0.0), True), "test is too easy: without remembering missed people it held anyway"
     assert not stacked(Config(), True), "a look-alike stacked below took the lock while the climber was missed"
     assert not stacked(Config(), False), "a look-alike stacked below took the lock when the climber's colour wobbled"
+    assert not stacked(Config(own_keep=0.4), True) and not stacked(Config(own_keep=0.4), False), "own_keep: stacked"
+    assert crossing(Config(own_keep=0.4)) and not apart(Config(own_keep=0.4)), "own_keep: crossing / kept apart"
     assert not tiein(slid=True, tiein_s=0.0), "test is too easy: without the tie-in phase the lock came back anyway"
     assert tiein(slid=True), "the climber left the ground beside the belayer, but the lock stayed"
     assert tiein(slid=False), "queue: someone else started up beside the climber and took the lock"

@@ -85,6 +85,8 @@ public final class TargetTracker {
     var kept = Kept()
     /// How long the lock has been locked on the track it follows now (s).
     var ownHeld = 0.0
+    /// Last time someone was within `ownGap` of the climber's track (TrackerConfig.ownKeep).
+    var crowdT: Double
     var tTag: Double
     var groundTag: Double
     let tagProfile: Profile
@@ -144,6 +146,7 @@ public final class TargetTracker {
         }
         self.frameHeight = frameHeight
         tTag = t
+        crowdT = t
         groundTag = ground
         tagProfile = profile  // the tie-in compares against this, never the live profile
         tiein = config.tieinS > 0
@@ -396,6 +399,11 @@ public final class TargetTracker {
                 }
             }
         }
+        if config.ownKeep >= 0 {  // the climber's track: the lock, else the box on their track, else the prediction
+            let tb = chosen >= 0 ? cc.boxes[chosen]
+                : (isT.firstIndex(of: true).map { cc.boxes[$0] } ?? predictedBox().float32)
+            if gap(tb, cc.boxes) <= config.ownGap { crowdT = t }
+        }
         if sep && config.trackKeepS > 0 { keep(cc, dt, chosen) }
         tracks = Tracks(boxes: cc.boxes, f32: cc.count > 0, age: age, isT: isT,
                         beside: sep ? beside : [Double](repeating: 0, count: cc.count))
@@ -494,6 +502,7 @@ public final class TargetTracker {
         }
         var floor = max(cfg.appMin, cfg.appRel * appLevel)
         if t < trustUntil { floor = cfg.appMin }  // referee just confirmed them: drop the relative bar
+        let own = ownKeep(cc, app, floor, motion)  // below the floor, but the lock's own track with nobody near
         var score = (0..<n).map { i -> Double in
             let a = max(app.v[i], 0)
             let appTerm = app.f32 ? Double(Float(0.55 as Double) * Float(a)) : 0.55 * a
@@ -503,7 +512,7 @@ public final class TargetTracker {
         var bad = implausible(cc, hs, hRef, hRefWeak).enumerated().map { $1 || vetoes[$0] }
         if cfg.jumpGuard {
             var jump = jumps(pred, since, dt, cc, cents, hRef)
-            let ok = (0..<n).map { known[$0] && app.ge($0, floor) && motion[$0] >= 0.05 && !bad[$0] }
+            let ok = (0..<n).map { known[$0] && (app.ge($0, floor) || own[$0]) && motion[$0] >= 0.05 && !bad[$0] }
             if ok.contains(true) {
                 let pick = argmax((0..<n).map { ok[$0] ? score[$0] : -1 })
                 let okMax = (0..<n).filter { ok[$0] }.map { score[$0] }.max()!
@@ -517,7 +526,7 @@ public final class TargetTracker {
             }
             for i in 0..<n where jump[i] { bad[i] = true }
         }
-        for i in 0..<n where !known[i] || app.lt(i, floor) || motion[i] < 0.05 || bad[i] { score[i] = 0 }
+        for i in 0..<n where !known[i] || (app.lt(i, floor) && !own[i]) || motion[i] < 0.05 || bad[i] { score[i] = 0 }
         if score.max()! < cfg.accept {
             // Nobody recognisable. Someone whose appearance couldn't be judged at all is acceptable
             // only right where we expect the climber.
@@ -537,11 +546,23 @@ public final class TargetTracker {
         if known[best] && app.ge(best, cfg.adaptApp) && !ambiguous && sources[best] == .view && steady() {
             profile.learn(cc, best, t, cfg)
         }
-        if known[best] { appLevel = 0.95 * appLevel + 0.05 * app.v[best] }
+        if known[best] && !own[best] { appLevel = 0.95 * appLevel + 0.05 * app.v[best] }
         state = .locked
         tSeen = t
         return Step(state: .locked, box: cc.boxes[best], velocity: v, chosen: best, app: app.v[best],
                     score: score[best], source: sources[best])
+    }
+
+    /// Candidates below the floor that keep the lock as its own track, nobody near (TrackerConfig.ownKeep).
+    func ownKeep(_ cc: Cands, _ app: Scores, _ floor: Double, _ motion: [Double]) -> [Bool] {
+        let cfg = config
+        var keep = [Bool](repeating: false, count: cc.count)
+        guard cfg.ownKeep >= 0, ownHeld >= cfg.settleS, t - crowdT >= cfg.ownAloneS else { return keep }
+        let isT = trackInfo(cc).isT
+        for k in 0..<cc.count where isT[k] && app.ge(k, cfg.ownKeep) && app.lt(k, floor) && motion[k] >= cfg.ownMotion {
+            keep[k] = gap(cc.boxes[k], cc.boxes) > cfg.ownGap
+        }
+        return keep
     }
 
     /// Referee vetoes apply to the recording-view candidates (the first `exclude.count`).

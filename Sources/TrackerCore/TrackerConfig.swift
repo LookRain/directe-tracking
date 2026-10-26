@@ -89,6 +89,13 @@ public struct TrackerConfig: Codable, Sendable, Equatable {
     // Two people stay two people through a loss too: while lost, nobody seen beside the locked climber for settleS
     // is re-acquired.
     public var keepApart = true
+    // The lock's own track keeps it through an appearance dip: held on that one-to-one track for settleS, with nobody
+    // within ownGap body heights of it for ownAloneS and where the climber was predicted (motion >= ownMotion), a
+    // candidate needs only ownKeep instead of the relative floor, and doesn't move appLevel. On in `combo`.
+    public var ownKeep = -1.0         // appearance floor for the lock's own track while nobody is near (< 0: off)
+    public var ownAloneS = 1.0
+    public var ownGap = 0.5           // body heights
+    public var ownMotion = 0.6
 
     public init() {}
 
@@ -97,7 +104,7 @@ public struct TrackerConfig: Codable, Sendable, Equatable {
     public static var combo: TrackerConfig {
         var c = TrackerConfig()
         c.learnGate = true; c.fallSize = true; c.negatives = true; c.transact = true
-        c.groundLatch = true; c.tieinS = 60
+        c.groundLatch = true; c.tieinS = 60; c.ownKeep = 0.4
         return c
     }
 
@@ -135,6 +142,7 @@ public struct TrackerConfig: Codable, Sendable, Equatable {
         try v(.transact, &transact); try v(.commitS, &commitS); try v(.doubtRival, &doubtRival)
         try v(.galleryAdmit, &galleryAdmit); try v(.galleryNew, &galleryNew); try v(.negDedupe, &negDedupe)
         try v(.oneToOne, &oneToOne); try v(.keepApart, &keepApart)
+        try v(.ownKeep, &ownKeep); try v(.ownAloneS, &ownAloneS); try v(.ownGap, &ownGap); try v(.ownMotion, &ownMotion)
     }
 
     /// The re-ID calibration for another embedder: `reidLo`/`reidHi` set to `lo`/`hi`, and the constants in cosine

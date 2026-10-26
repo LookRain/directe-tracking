@@ -165,6 +165,39 @@ private func apartTookLock(_ cfg: TrackerConfig) -> Bool {
     #expect(!apartTookLock(TrackerConfig()), "a look-alike seen beside the climber was re-acquired while the climber was hidden")
 }
 
+/// The climber's colour reads poorly for 1 s (~0.6 against a floor of ~0.75), alone or with someone else (another
+/// colour) standing just beside them. True if the lock held on the climber throughout (TrackerConfig.ownKeep).
+private func dipHeld(_ cfg: TrackerConfig, beside: Bool) -> Bool {
+    let trk = tracker(cfg)
+    var held = true
+    for k in 1..<50 {
+        let t = Double(k) * 0.1
+        var c = cands([(500, 600)] + (beside ? [(500 + 0.9 * H, 600)] : []))
+        if beside {
+            var f = Array(repeating: Float(0), count: D)
+            f[7] = 1
+            c[1].feats = Array(repeating: f, count: R)
+        }
+        if 2.0 <= t && t < 3.0 {
+            var f = Array(repeating: Float(0), count: D)
+            for j in 0..<6 { f[j] = Float(1.0 / 6) }
+            c[0].feats = Array(repeating: f, count: R)
+        }
+        held = on(trk.step(t: t, view: c), 500, 600) && held
+    }
+    return held
+}
+
+@Test func selftestOwnKeep() {
+    var keep = TrackerConfig()
+    keep.ownKeep = 0.4
+    #expect(!dipHeld(TrackerConfig(), beside: false), "test is too easy: the lock held through the dip without ownKeep")
+    #expect(dipHeld(keep, beside: false), "the climber's own track, nobody near, let go through an appearance dip")
+    #expect(!dipHeld(keep, beside: true), "ownKeep held the lock with someone right beside the climber")
+    #expect(!stackedTookLock(keep, gaps: true) && !stackedTookLock(keep, gaps: false), "ownKeep: stacked")
+    #expect(crossingKeepsClimber(keep) && !apartTookLock(keep), "ownKeep: crossing / kept apart")
+}
+
 /// The tag window follows the tapped person one to one, and stops once someone merges into their box.
 @Test func selftestTagFollow() {
     let me = Box(0, 0, 60, 200), other = Box(50, 0, 110, 200)

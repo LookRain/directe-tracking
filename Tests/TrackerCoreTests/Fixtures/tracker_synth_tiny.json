@@ -64,7 +64,11 @@
     "commit_s": 5.0,
     "doubt_rival": 0.05,
     "one_to_one": true,
-    "keep_apart": true
+    "keep_apart": true,
+    "own_keep": -1.0,
+    "own_alone_s": 1.0,
+    "own_gap": 0.5,
+    "own_motion": 0.6
    }
   },
   {
@@ -123,7 +127,11 @@
     "commit_s": 5.0,
     "doubt_rival": 0.05,
     "one_to_one": true,
-    "keep_apart": true
+    "keep_apart": true,
+    "own_keep": 0.4,
+    "own_alone_s": 1.0,
+    "own_gap": 0.5,
+    "own_motion": 0.6
    }
   },
   {
@@ -182,7 +190,11 @@
     "commit_s": 5.0,
     "doubt_rival": 0.05,
     "one_to_one": true,
-    "keep_apart": true
+    "keep_apart": true,
+    "own_keep": 0.4,
+    "own_alone_s": 1.0,
+    "own_gap": 0.5,
+    "own_motion": 0.6
    }
   },
   {
@@ -241,7 +253,11 @@
     "commit_s": 5.0,
     "doubt_rival": 0.05,
     "one_to_one": true,
-    "keep_apart": true
+    "keep_apart": true,
+    "own_keep": -1.0,
+    "own_alone_s": 1.0,
+    "own_gap": 0.5,
+    "own_motion": 0.6
    }
   }
  ],
