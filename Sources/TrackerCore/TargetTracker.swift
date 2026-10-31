@@ -764,7 +764,12 @@ public final class TargetTracker {
     func miss(_ pred: SIMD2<Double>, _ since: Double) -> Step {
         c = pred
         v *= 0.8
-        state = since < config.uncertainS ? .uncertain : .lost
+        var limit = config.uncertainS
+        if config.stillUncertainS > limit, state != .lost, let fh = frameHeight, wh.y < config.stillSmallBelow * fh,
+           (v.x * v.x + v.y * v.y).squareRoot() < 0.2 * wh.y {
+            limit = config.stillUncertainS  // small and still: not gone, just unseen
+        }
+        state = since < limit ? .uncertain : .lost
         return Step(state: state, box: predictedBox(), velocity: v, chosen: -1, app: 0, score: 0)
     }
 

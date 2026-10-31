@@ -25,6 +25,12 @@ public struct TrackerConfig: Codable, Sendable, Equatable {
     /// tag's own moment (dt clamped to 1 ms) read 7 px as 1,000 px/s, and the prediction slid 600 px down the wall away
     /// from a climber resting at the top (30 Oct recording, 565 s): lost 92 s, then locked onto someone else.
     public var minUpdateDt = 0.0
+    /// A small climber (shorter than `stillSmallBelow` of the frame's height) who was barely moving (under 0.2 of
+    /// their height a second) when the detector stopped seeing them stays uncertain, not lost, for this long (s; 0:
+    /// off, as the lab), so they're matched again as themselves when seen. Crouched at the top of the wall, folded
+    /// among the holds, a climber isn't seen as a person for 3-5 s at a time (30 Oct recording, 622 s and 635 s).
+    public var stillUncertainS = 0.0
+    public var stillSmallBelow = 0.06
     public var uncertainS = 2.0       // predict-only time before declaring lost
     public var adaptRate = 0.03       // colour profile adaptation per confident frame
     public var adaptApp = 0.70
@@ -134,7 +140,7 @@ public struct TrackerConfig: Codable, Sendable, Equatable {
         try v(.appMin, &appMin); try v(.appRel, &appRel); try v(.accept, &accept)
         try v(.reacquireApp, &reacquireApp); try v(.reacquireFrames, &reacquireFrames)
         try v(.reacquireWindow, &reacquireWindow); try v(.reacquireNear, &reacquireNear)
-        try v(.minUpdateDt, &minUpdateDt)
+        try v(.minUpdateDt, &minUpdateDt); try v(.stillUncertainS, &stillUncertainS); try v(.stillSmallBelow, &stillSmallBelow)
         try v(.uncertainS, &uncertainS); try v(.adaptRate, &adaptRate); try v(.adaptApp, &adaptApp)
         try v(.useColour, &useColour); try v(.useReid, &useReid); try v(.colourWeight, &colourWeight)
         try v(.reidMode, &reidMode); try v(.reidLo, &reidLo); try v(.reidHi, &reidHi)
