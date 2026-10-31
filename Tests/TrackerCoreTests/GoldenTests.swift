@@ -226,7 +226,7 @@ func goldenReplay(name: String, configName: String) throws {
     enc.keyEncodingStrategy = .convertToSnakeCase
     let ours = try JSONSerialization.jsonObject(with: enc.encode(TrackerConfig())) as! [String: Any]
     // Swift-only: directe_tracking/tracker.py's literals (0.1, 0.9, 0.92), fields so `recalibrate` moves them with reid_lo/hi
-    let swiftOnly: Set = ["gallery_admit", "gallery_new", "neg_dedupe"]
+    let swiftOnly: Set = ["gallery_admit", "gallery_new", "neg_dedupe", "reacquire_window", "reacquire_near", "min_update_dt"]  // the live tracker's, off in jobs
     #expect(Set(ours.keys).subtracting(swiftOnly) == Set(lab.keys))
     #expect(g.config("default") == TrackerConfig())
     #expect(g.config("combo") == TrackerConfig.combo)

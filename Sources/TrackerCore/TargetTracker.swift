@@ -78,7 +78,7 @@ public final class TargetTracker {
     /// rule's comparison with the float32 boxes.
     var groundStrong = false
     var h0: Double
-    var reacq: (cent: SIMD2<Double>, n: Int)?
+    var reacq: (cent: SIMD2<Double>, n: Int, t: Double, near: Bool)?
     var trustUntil = -1e9
     var fallT = -1e9
     var tracks = Tracks()
@@ -756,7 +756,7 @@ public final class TargetTracker {
         let pred = c + v * dt
         let r = cent - pred
         c = pred + 0.6 * r  // alpha-beta filter
-        v = v + 0.15 * r / dt
+        if dt >= config.minUpdateDt { v = v + 0.15 * r / dt }
         let k = Float(0.3 as Double)
         wh = 0.7 * wh + SIMD2(Double(k * Float(f32(box.x1 - box.x0))), Double(k * Float(f32(box.y1 - box.y0))))
     }
@@ -780,13 +780,17 @@ public final class TargetTracker {
         }
         let best = argmax(app.v)
         if app.lt(best, config.reacquireApp) {
+            // a near sighting waits out a look or two without one (`reacquireWindow`)
+            if let p = reacq, p.near, t - p.t <= config.reacquireWindow { return miss(pred, since) }
             reacq = nil
             return miss(pred, since)
         }
+        let near = config.reacquireWindow > 0
+            && norm32([Float(cents[best].x - c.x), Float(cents[best].y - c.y)]) <= Float(config.reacquireNear * max(wh.y, 1))
         if let p = reacq, norm32([Float(cents[best].x - p.cent.x), Float(cents[best].y - p.cent.y)]) < Float(hs[best]) {
-            reacq = (cents[best], p.n + 1)
+            reacq = (cents[best], p.n + 1, t, near && p.near)
         } else {
-            reacq = (cents[best], 1)
+            reacq = (cents[best], 1, t, near)
         }
         if reacq!.n < config.reacquireFrames { return miss(pred, since) }
         reacq = nil
