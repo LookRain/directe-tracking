@@ -250,7 +250,7 @@ public final class TargetTracker {
             }
         }
         if doubt {
-            profile.doubt()
+            if cfg.doubtReach >= 0 { profile.doubt(since: t - cfg.doubtReach) } else { profile.doubt() }
         } else {
             profile.commitDue(t, cfg)
         }

@@ -262,6 +262,9 @@ public struct Profile: Sendable {
 
     /// Something suggests the lock may have been wrong lately: forget what it taught us.
     mutating func doubt() { pending = [] }
+
+    /// A doubt about the lock since `t`: forget what it taught us from then on.
+    mutating func doubt(since t: Double) { pending.removeAll { $0.t >= t } }
 }
 
 // MARK: - Appearance state (export / import)

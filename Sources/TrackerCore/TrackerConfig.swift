@@ -96,6 +96,11 @@ public struct TrackerConfig: Codable, Sendable, Equatable {
     public var negSize = 60
     public var transact = false       // profile updates wait commitS with no doubt; any doubt discards them
     public var commitS = 5.0
+    // A doubt drops only the updates of its last doubtReach seconds (< 0: all of them). In a crowd the doubts come
+    // every few seconds (someone crossing in front, a look-alike nearby), and dropping everything pending meant
+    // nothing was ever committed: 17 s into a busy gym clip the profile had learnt no other people and no new views,
+    // and a belayer in a similar top took the lock while the climber was hidden (owner's report, 2 Nov).
+    public var doubtReach = -1.0
     public var doubtRival = 0.05      // a rival this close is a doubt
     // One person, one track: this frame's people take over last frame's tracks, and those of people missed lately,
     // one to one, best overlap first. Each taking its own best overlap let two people inherit one track: a climber
@@ -157,6 +162,7 @@ public struct TrackerConfig: Codable, Sendable, Equatable {
         try v(.negatives, &negatives); try v(.negLam, &negLam); try v(.negMargin, &negMargin)
         try v(.negColour, &negColour); try v(.negEveryS, &negEveryS); try v(.negSize, &negSize)
         try v(.transact, &transact); try v(.commitS, &commitS); try v(.doubtRival, &doubtRival)
+        try v(.doubtReach, &doubtReach)
         try v(.galleryAdmit, &galleryAdmit); try v(.galleryNew, &galleryNew); try v(.negDedupe, &negDedupe)
         try v(.oneToOne, &oneToOne); try v(.keepApart, &keepApart)
         try v(.ownKeep, &ownKeep); try v(.ownAloneS, &ownAloneS); try v(.ownGap, &ownGap); try v(.ownMotion, &ownMotion)
