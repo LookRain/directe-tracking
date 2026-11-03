@@ -10,8 +10,15 @@ import Foundation
 final class Embedder {
     let model: MLModel
     static let inputW = 128, inputH = 256
+    /// The model's own input size (OSNet: 128x256; other nets may take more pixels).
+    let inputW: Int, inputH: Int
 
-    init(model: MLModel) { self.model = model }
+    init(model: MLModel) {
+        self.model = model
+        let c = model.modelDescription.inputDescriptionsByName["image"]?.imageConstraint
+        inputW = c?.pixelsWide ?? Self.inputW
+        inputH = c?.pixelsHigh ?? Self.inputH
+    }
 
     /// lab masked_crop(frame, box, poly) -> (plain, masked); returns the one asked for.
     static func crop(_ frame: PixelView, box: SIMD4<Float>, poly: [SIMD2<Double>]?, masked: Bool) -> BGRAImage {
@@ -42,7 +49,7 @@ final class Embedder {
         if crops.isEmpty { return [] }
         var inputs: [MLFeatureProvider] = []
         for c in crops {
-            let pb = try pool.make(width: Self.inputW, height: Self.inputH)
+            let pb = try pool.make(width: inputW, height: inputH)
             try withPixels(pb, readOnly: false) { dst in
                 if c.width == 0 || c.height == 0 { dst.fill(0, 0, 0) } else { cvResize(c.view, dst, .linear) }
             }
