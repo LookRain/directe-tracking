@@ -12,7 +12,7 @@ the climber. The app itself (framing, rest detection, export, UI) is not part of
 | Path | What |
 |---|---|
 | `Sources/TrackerCore` | Pure Swift. `TargetTracker`: who the climber is, tick to tick, with Locked / Uncertain / Lost states; the tag at the tap; per-climber profiles (colour by body region, re-ID embeddings, a gallery of other viewpoints, banked negatives); fall, ground and tie-in rules; camera-motion compensation. |
-| `Sources/Perception` | Core ML person detection (YOLO26 pose, optional masks), re-ID embeddings (OSNet), colour features, "is the wall moving here" motion evidence and whole-image camera shift. Turns a frame into the tracker's candidates. |
+| `Sources/Perception` | Core ML person detection (RTMO pose, or YOLO26; optional masks), re-ID embeddings (OSNet), colour features, "is the wall moving here" motion evidence and whole-image camera shift. Turns a frame into the tracker's candidates. |
 | `python/directe_tracking` | The reference implementation in Python (NumPy, OpenCV, Ultralytics, boxmot). The Swift modules are bit-exact ports of it. This is where the tracker is developed and evaluated on recorded clips. |
 | `tools/export_coreml.py` | Exports the upstream weights to the Core ML models Perception loads (FP16, raw heads, NMS in Swift; multifunction models for the three input shapes). |
 | `tools/coreml_bench.py` | Times the models on a Mac's Neural Engine. |
@@ -67,18 +67,25 @@ Frames are 32BGRA `CVPixelBuffer`s in upright source pixels.
 
 ## Models
 
-No weights are included. `tools/export_coreml.py` downloads them from upstream and exports them:
+No weights are included. Two sets export to the same input and output layouts, so Perception runs either:
 
-- **Pose and masks:** [Ultralytics YOLO26](https://github.com/ultralytics/ultralytics) (`yolo26n/m-pose`,
-  `yolo26n/m-seg`), licensed AGPL-3.0 by Ultralytics.
-- **Re-ID:** OSNet from [boxmot](https://github.com/mikel-brostrom/boxmot) / torchreid (`osnet_x0_25_msmt17`,
+- **Open set (`ModelSet.lite`, `.mid`):** `tools/export_open_models.py` exports
+  [RTMO](https://github.com/open-mmlab/mmpose/tree/main/projects/rtmo) (`rtmo-s`, `rtmo-m`: pose) and
+  [RTMDet](https://github.com/open-mmlab/mmdetection/tree/main/configs/rtmdet) (`rtmdet-m`: people for second
+  chance), OpenMMLab's COCO-trained weights, Apache-2.0. RTMO starts from YOLOX trained from scratch on COCO; RTMDet's
+  backbone was pretrained on ImageNet.
+- **YOLO26 set (`ModelSet.yoloLite`, `.yoloMid`):** `tools/export_coreml.py` exports
+  [Ultralytics YOLO26](https://github.com/ultralytics/ultralytics) (`yolo26n/m-pose`, `yolo26n/m-seg`), licensed
+  AGPL-3.0 by Ultralytics. The Python reference tracker and its golden tests use these.
+- **Re-ID (both):** OSNet from [boxmot](https://github.com/mikel-brostrom/boxmot) / torchreid (`osnet_x0_25_msmt17`,
   `osnet_ain_x1_0_msmt17`, `osnet_ibn_x1_0_msdc`). The weights were trained on research datasets (MSMT17 and
   others) with their own terms.
 
 Check those licences before you ship the weights in a product.
 
 ```sh
-uv run --project python --extra reid --extra coreml python tools/export_coreml.py
+uv run --project python --extra reid --extra coreml python tools/export_coreml.py   # YOLO26 + OSNet
+python tools/export_open_models.py   # RTMO + RTMDet (mmpose / mmdet; see its docstring for the environment)
 ```
 
 `$DIRECTE_DATA` (default `./data`) is where models, cached detections and runs go.

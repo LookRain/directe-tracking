@@ -69,7 +69,7 @@ struct PerceptionGolden {
     @Test(arguments: ["lite", "mid"])
     func matchesLab(_ pipeline: String) throws {
         let fx = try Golden.json("perception_\(pipeline).json")
-        let set = pipeline == "lite" ? ModelSet.lite : labMid
+        let set = pipeline == "lite" ? ModelSet.yoloLite : labMid  // the lab runs the YOLO26 models
         let models = try PerceptionModels(set, directory: Golden.models, computeUnits: Golden.units)
         let perceiver = Perceiver(models: models)
         let st = Stats()

@@ -25,16 +25,30 @@ public struct ModelSet: Sendable, Hashable, CustomStringConvertible {
         self.secondPose = secondPose; self.secondSeg = secondSeg; self.reid = reid
     }
 
-    /// lab pipeline "lite": yolo26n pose + seg at 640, OSNet x0.25.
-    public static let lite = ModelSet(name: "lite", widePose: "yolo26n-pose", focusPose: "yolo26n-pose",
-                                      focusSeg: "yolo26n-seg", secondPose: "yolo26n-pose", secondSeg: "yolo26n-seg",
+    /// The small set, what an app bundles: RTMO-s pose everywhere (Apache-2.0, COCO only; tools/export_open_models.py),
+    /// RTMO-s as second chance's mask-model stand-in (box-shaped masks), OSNet x0.25. No focus-window mask model
+    /// ("none"): box masks would put the background into the colour profile, so masks are off and colour comes from
+    /// the keypoint regions alone.
+    public static let lite = ModelSet(name: "lite", widePose: "rtmo-s", focusPose: "rtmo-s",
+                                      focusSeg: "none", secondPose: "rtmo-s", secondSeg: "rtmo-s-boxseg",
                                       reid: "osnet_x0_25_msmt17")
-    /// The app default (docs/review/deep-dives/detector-size.md): yolo26m pose + seg at 640 in the
-    /// wide and focus passes, the nano models for second chance (same recall at 2x, ~20 ms cheaper),
-    /// OSNet-AIN re-ID. (The lab's "mid" pipeline also uses yolo26m for second chance.)
-    public static let mid = ModelSet(name: "mid", widePose: "yolo26m-pose", focusPose: "yolo26m-pose",
-                                     focusSeg: "yolo26m-seg", secondPose: "yolo26n-pose", secondSeg: "yolo26n-seg",
+    /// The app default: RTMO-m pose in the wide and focus passes, RTMO-s for second chance with RTMDet-m finding people
+    /// in the mask model's slot (box-shaped masks; no mask model for the focus window yet, so masks are off), OSNet-AIN
+    /// re-ID. Live segments 99.3% right, 0% someone else (YOLO26 `yoloMid`: 93.4%, 0.7%); RTMO-m runs 6.9 ms at
+    /// 640 x 640 on the Neural Engine vs 10.9 for yolo26m-pose (docs/review/deep-dives/safe-models.md in the app repo).
+    public static let mid = ModelSet(name: "mid", widePose: "rtmo-m", focusPose: "rtmo-m",
+                                     focusSeg: "rtmdet-ins-m", secondPose: "rtmo-s", secondSeg: "rtmdet-m-boxseg",
                                      reid: "osnet_ain_x1_0_msmt17")
+    /// The YOLO26 sets these replace (Ultralytics, AGPL-3.0 weights; tools/export_coreml.py), for comparison:
+    /// yolo26n pose + seg at 640, OSNet x0.25 ...
+    public static let yoloLite = ModelSet(name: "yoloLite", widePose: "yolo26n-pose", focusPose: "yolo26n-pose",
+                                          focusSeg: "yolo26n-seg", secondPose: "yolo26n-pose", secondSeg: "yolo26n-seg",
+                                          reid: "osnet_x0_25_msmt17")
+    /// ... and yolo26m pose + seg at 640 in the wide and focus passes (docs/review/deep-dives/detector-size.md), the
+    /// nano models for second chance, OSNet-AIN re-ID.
+    public static let yoloMid = ModelSet(name: "yoloMid", widePose: "yolo26m-pose", focusPose: "yolo26m-pose",
+                                         focusSeg: "yolo26m-seg", secondPose: "yolo26n-pose", secondSeg: "yolo26n-seg",
+                                         reid: "osnet_ain_x1_0_msmt17")
     public static let `default` = mid
 
     public var description: String { name }
