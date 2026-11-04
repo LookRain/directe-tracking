@@ -62,6 +62,16 @@ public struct ModelSet: Sendable, Hashable, CustomStringConvertible {
                                          reid: "osnet_ain_x1_0_msmt17")
     public static let `default` = mid
 
+    /// The compiled models (`.mlmodelc` names) this set can't load without, each as the names any one of which will do
+    /// (a pose model as one multifunction `_shapes` file or per-shape `_640` ones). The focus window's mask model and
+    /// the plain-crop re-ID net are optional, so not here. An app checks its bundle with this rather than a file name of
+    /// its own (build 114 looked for a renamed file, didn't find it, and ran its stand-in engine).
+    public var needs: [[String]] {
+        let poses = Set([widePose, focusPose, secondPose]).sorted().map { ["\($0)_shapes", "\($0)_640"] }
+        let seg = secondSeg.split(separator: ":").map(String.init)
+        return poses + [seg.count == 2 ? ["\(seg[0])_shapes"] : ["\(secondSeg)_640"], [reid]]
+    }
+
     public var description: String { name }
 }
 
@@ -92,6 +102,10 @@ public final class PerceptionModels: @unchecked Sendable {
         .cpuAndNeuralEngine
         #endif
     }
+
+    /// Where each model's load is told (its start and how long it took), for an app's log: a load that never comes back
+    /// on a phone then shows which model it was (build 114). Nil: not told.
+    nonisolated(unsafe) public static var loadLog: (@Sendable (String) -> Void)?
 
     public let set: ModelSet
     let widePose: PoseNet
@@ -153,8 +167,15 @@ public final class PerceptionModels: @unchecked Sendable {
         let config = MLModelConfiguration()
         config.computeUnits = computeUnits
         var cache: [String: MLModel] = [:]
+        let place = computeUnits == .cpuOnly ? "CPU" : computeUnits == .cpuAndNeuralEngine ? "Neural Engine" : "units \(computeUnits.rawValue)"
         func open(_ url: URL, _ c: MLModelConfiguration, _ name: String) throws -> MLModel {
-            do { return try MLModel(contentsOf: url, configuration: c) } catch {
+            let started = Date()
+            Self.loadLog?("model \(name) (\(set.name), \(place)): loading")
+            do {
+                let m = try MLModel(contentsOf: url, configuration: c)
+                Self.loadLog?(String(format: "model %@ (%@, %@): loaded in %.2f s", name, set.name, place, Date().timeIntervalSince(started)))
+                return m
+            } catch {
                 throw PerceptionError.modelLoad(name, "\(error)")
             }
         }
@@ -223,12 +244,14 @@ public final class PerceptionModels: @unchecked Sendable {
         // The re-ID net gives all-zero embeddings on the iOS Simulator's GPU (and the tracker then never locks): if
         // it doesn't answer sensibly where it was put, run it on the CPU.
         var reidModel = try load(set.reid)!
+        Self.loadLog?("model \(set.reid) (\(set.name), \(place)): checking its answers")
         if computeUnits != .cpuOnly, !Embedder.works(reidModel), let url = locate(set.reid) {
             let cpu = MLModelConfiguration()
             cpu.computeUnits = .cpuOnly
             reidModel = try MLModel(contentsOf: url, configuration: cpu)
         }
         reid = Embedder(model: reidModel)
+        Self.loadLog?("models \(set.name) (\(place)): all loaded")
     }
 }
 
