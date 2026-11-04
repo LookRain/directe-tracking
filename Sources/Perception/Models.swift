@@ -31,17 +31,20 @@ public struct ModelSet: Sendable, Hashable, CustomStringConvertible {
     /// The small set, what an app bundles: the default set's detection and outline models with 8-bit weights (owner,
     /// 4 Nov: "ship the 8-bit model into the app, everything including the detection, reid … and outline models";
     /// tools/export_open_models.py): RTMO-m pose and its box finder, RTMDet-Ins-m outlines, and the 16-bit OSNets (small
-    /// enough: 9 MB). The same settings as `mid`, which a download replaces it with on Wi-Fi.
+    /// enough: 9 MB). The same settings as `mid`, which a download replaces it with on Wi-Fi. One-function models only:
+    /// on an iPhone (iOS 27.2) the 8-bit multifunction model failed to load for the Neural Engine ("`.functionName`
+    /// must be nil unless the model type is ML Program"; fine on the CPU and on a Mac, build 112), so RTMO-m comes at
+    /// 640 x 640 only and second chance's mask model is the outline model.
     public static let lite = ModelSet(name: "lite", widePose: "rtmo-m-q8", focusPose: "rtmo-m-q8",
-                                      focusSeg: "rtmdet-ins-m-q8", secondPose: "rtmo-m-q8", secondSeg: "rtmo-m-q8:seg640",
+                                      focusSeg: "rtmdet-ins-m-q8", secondPose: "rtmo-m-q8", secondSeg: "rtmdet-ins-m-q8",
                                       reid: "osnet_ain_x1_0_msmt17")
     /// The app default: RTMO-m pose in the wide and focus passes, RTMO-m's box finder (function seg640 of its model: no
-    /// extra weights) and RTMO-s pose for second chance, RTMDet-Ins-m outlines in the focus window when masks are on
+    /// extra weights) and RTMO-m pose again for second chance (the same loaded model), RTMDet-Ins-m outlines in the focus window when masks are on
     /// (optional: an app may leave it out), OSNet-AIN re-ID. Live segments (Dual Lens) 97.4% right, 0% someone else vs
     /// 93.4% / 0.7% for the YOLO26 set (`yoloMid`); lock-on bench 84.8% vs 84.2%. RTMO-m runs 6.9 ms at 640 x 640 on
     /// the Neural Engine vs 10.9 for yolo26m-pose (docs/review/deep-dives/safe-models.md in the app repo).
     public static let mid = ModelSet(name: "mid", widePose: "rtmo-m", focusPose: "rtmo-m",
-                                     focusSeg: "rtmdet-ins-m", secondPose: "rtmo-s", secondSeg: "rtmo-m:seg640",
+                                     focusSeg: "rtmdet-ins-m", secondPose: "rtmo-m", secondSeg: "rtmo-m:seg640",
                                      reid: "osnet_ain_x1_0_msmt17")
     /// The RTMO-s small set the 8-bit one replaced (masks off, OSNet x0.25), for comparison.
     public static let rtmoSmall = ModelSet(name: "rtmoSmall", widePose: "rtmo-s", focusPose: "rtmo-s",
@@ -150,13 +153,18 @@ public final class PerceptionModels: @unchecked Sendable {
         let config = MLModelConfiguration()
         config.computeUnits = computeUnits
         var cache: [String: MLModel] = [:]
+        func open(_ url: URL, _ c: MLModelConfiguration, _ name: String) throws -> MLModel {
+            do { return try MLModel(contentsOf: url, configuration: c) } catch {
+                throw PerceptionError.modelLoad(name, "\(error)")
+            }
+        }
         func load(_ name: String, required: Bool = true) throws -> MLModel? {
             if let m = cache[name] { return m }
             guard let url = locate(name) else {
                 if required { throw PerceptionError.modelMissing(name) }
                 return nil
             }
-            let m = try MLModel(contentsOf: url, configuration: config)
+            let m = try open(url, config, name)
             cache[name] = m
             return m
         }
@@ -168,7 +176,7 @@ public final class PerceptionModels: @unchecked Sendable {
                     if cache[key] == nil {
                         let c = config.copy() as! MLModelConfiguration
                         c.functionName = Self.function(shape)
-                        cache[key] = try MLModel(contentsOf: url, configuration: c)
+                        cache[key] = try open(url, c, key)
                     }
                     shapes[shape] = cache[key]
                 }
@@ -206,7 +214,7 @@ public final class PerceptionModels: @unchecked Sendable {
                 }
                 let c = config.copy() as! MLModelConfiguration
                 c.functionName = parts[1]
-                cache[key] = try MLModel(contentsOf: url, configuration: c)
+                cache[key] = try open(url, c, key)
             }
             return SegNet(model: cache[key]!)
         }

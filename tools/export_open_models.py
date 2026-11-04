@@ -68,7 +68,10 @@ POSE = {  # name: (mmpose config, checkpoint, box scale w, h)
 }
 DET = {"rtmdet-ins-m": ("rtmdet/rtmdet-ins_m_8xb32-300e_coco.py", "rtmdet-ins_m_8xb32-300e_coco_20221123_001039-6eba602e.pth")}
 # ModelSet.lite (Sources/Perception/Models.swift) and the multifunction OSNet x0.25 the YOLO26 export bundles
-BUNDLED = ["rtmo-m-q8_shapes", "rtmdet-ins-m-q8_640", "osnet_ain_x1_0_msmt17", "osnet_ibn_x1_0_msdc"]
+# One-function models only: an iPhone (iOS 27.2) wouldn't load the 8-bit multifunction rtmo-m-q8_shapes for the Neural
+# Engine ("`.functionName` must be nil unless the model type is ML Program"; fine on its CPU and on a Mac, build 112), so
+# RTMO-m comes at 640 x 640 only and the outline model is second chance's mask model too.
+BUNDLED = ["rtmo-m-q8_640", "rtmdet-ins-m-q8_640", "osnet_ain_x1_0_msmt17", "osnet_ibn_x1_0_msdc"]
 # the 8-bit copies (ModelSet.lite): weights per-channel int8 (coremltools linear_quantize_weights), outputs within 0.4%
 # of the 16-bit ones; the OSNets come from tools/export_coreml.py's packages
 OSNETS = ["osnet_ain_x1_0_msmt17", "osnet_ibn_x1_0_msdc"]
@@ -349,6 +352,11 @@ def main():
         int8(segs["rtmo-m"], OUT / "rtmo-m-q8-boxseg_640.mlpackage")
         merge_shapes("rtmo-m-q8", {"seg640": OUT / "rtmo-m-q8-boxseg_640.mlpackage"})
     pkgs.append(q8)
+    q8one = OUT / "rtmo-m-q8_640.mlpackage"  # the bundled one: 640 x 640 alone (BUNDLED)
+    if q8one.exists():
+        shutil.rmtree(q8one)
+    shutil.copytree(OUT / "rtmo-m-q8_640x640.mlpackage", q8one)
+    pkgs.append(q8one)
     for name in OSNETS:
         dst = OUT / f"{name}-q8.mlpackage"
         if a.force or not dst.exists():

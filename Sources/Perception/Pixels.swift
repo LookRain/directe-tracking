@@ -9,6 +9,8 @@ public enum PerceptionError: Error, CustomStringConvertible {
     case pixelBuffer(CVReturn)
     case modelMissing(String)
     case modelOutput(String)
+    /// A model that's there but Core ML wouldn't load (its name, function, and Core ML's error).
+    case modelLoad(String, String)
 
     public var description: String {
         switch self {
@@ -16,6 +18,7 @@ public enum PerceptionError: Error, CustomStringConvertible {
         case .pixelBuffer(let r): return "CVPixelBufferCreate failed (\(r))"
         case .modelMissing(let n): return "Core ML model \(n) not found"
         case .modelOutput(let n): return "unexpected Core ML output: \(n)"
+        case .modelLoad(let n, let e): return "Core ML model \(n) didn't load: \(e)"
         }
     }
 }
