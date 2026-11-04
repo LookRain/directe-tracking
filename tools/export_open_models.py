@@ -12,7 +12,7 @@ download server) in $DIRECTE_DATA/models/external/safe:
   ImageNet-pretrained)
 
 Writes $DIRECTE_DATA/models/coreml/open/<name>.mlpackage, compiled into models/coreml/app (next to the YOLO26 ones; the
-names differ) and models/coreml/bundle-open (ModelSet.lite, what an app bundles):
+names differ) and models/coreml/bundle-open-q8 (ModelSet.lite, what an app bundles):
 
   rtmo-m_shapes, rtmo-s_shapes   pose, functions s640x640 / s640x384 / s384x640 (weights stored once); rtmo-s_shapes
                                  and seg640, the model's box finder (ModelSet's "rtmo-m:seg640", "rtmo-s:seg640")
@@ -56,7 +56,7 @@ DATA = Path(os.environ.get("DIRECTE_DATA", "/Volumes/ROCKET-XTRM/Offload/climb-c
 W = DATA / "models" / "external" / "safe"
 OUT = DATA / "models" / "coreml" / "open"
 APP = DATA / "models" / "coreml" / "app"
-BUNDLE = DATA / "models" / "coreml" / "bundle-open"
+BUNDLE = DATA / "models" / "coreml" / "bundle-open-q8"
 SHAPES = [(640, 640), (640, 384), (384, 640)]
 # NMS overlap for every model here (YOLO26: 0.7). RTMO's neighbouring anchors fire together: at 0.7 one person came out
 # as two boxes in 31% of looks on a synthetic scene (YOLO26 under 1%), which the tracker reads as someone beside the
@@ -68,7 +68,10 @@ POSE = {  # name: (mmpose config, checkpoint, box scale w, h)
 }
 DET = {"rtmdet-ins-m": ("rtmdet/rtmdet-ins_m_8xb32-300e_coco.py", "rtmdet-ins_m_8xb32-300e_coco_20221123_001039-6eba602e.pth")}
 # ModelSet.lite (Sources/Perception/Models.swift) and the multifunction OSNet x0.25 the YOLO26 export bundles
-BUNDLED = ["rtmo-s_shapes", "osnet_x0_25_msmt17"]
+BUNDLED = ["rtmo-m-q8_shapes", "rtmdet-ins-m-q8_640", "osnet_ain_x1_0_msmt17", "osnet_ibn_x1_0_msdc"]
+# the 8-bit copies (ModelSet.lite): weights per-channel int8 (coremltools linear_quantize_weights), outputs within 0.4%
+# of the 16-bit ones; the OSNets come from tools/export_coreml.py's packages
+OSNETS = ["osnet_ain_x1_0_msmt17", "osnet_ibn_x1_0_msdc"]
 
 
 def configs(pkg: str) -> Path:
@@ -297,6 +300,17 @@ def merge_shapes(name: str, extra: dict[str, Path] | None = None) -> Path:
     return target
 
 
+def int8(src: Path, dst: Path) -> Path:
+    import coremltools as ct
+    from coremltools.optimize.coreml import OpLinearQuantizerConfig, OptimizationConfig, linear_quantize_weights
+    cfg = OptimizationConfig(global_config=OpLinearQuantizerConfig(mode="linear_symmetric", dtype="int8",
+                                                                     granularity="per_channel", weight_threshold=2048))
+    if dst.exists():
+        shutil.rmtree(dst)
+    linear_quantize_weights(ct.models.MLModel(str(src), skip_model_load=True), config=cfg).save(str(dst))
+    return dst
+
+
 def compile_app(pkg: Path) -> Path:
     APP.mkdir(parents=True, exist_ok=True)
     out = APP / (pkg.stem + ".mlmodelc")
@@ -327,11 +341,28 @@ def main():
                         f"{name} (mmpose RTMO, Apache-2.0, COCO) in YOLO26-pose layout, {hw[0]}x{hw[1]}")
             merge_shapes(name, {"seg640": segs[name]})
         pkgs.append(target)
+    # the built-in set: rtmo-m and the OSNets at 8 bits
+    q8 = OUT / "rtmo-m-q8_shapes.mlpackage"
+    if a.force or not q8.exists():
+        for h, w in SHAPES:
+            int8(OUT / f"rtmo-m_{h}x{w}.mlpackage", OUT / f"rtmo-m-q8_{h}x{w}.mlpackage")
+        int8(segs["rtmo-m"], OUT / "rtmo-m-q8-boxseg_640.mlpackage")
+        merge_shapes("rtmo-m-q8", {"seg640": OUT / "rtmo-m-q8-boxseg_640.mlpackage"})
+    pkgs.append(q8)
+    for name in OSNETS:
+        dst = OUT / f"{name}-q8.mlpackage"
+        if a.force or not dst.exists():
+            int8(DATA / "models" / "coreml" / f"{name}.mlpackage", dst)
+        pkgs.append(dst)
     ins = OUT / "rtmdet-ins-m_640.mlpackage"
     if a.force or not ins.exists():
         convert(RTMDetInsSeg(load_det("rtmdet-ins-m")), (640, 640), ["detections", "protos"], ins,
                 "rtmdet-ins-m (mmdet RTMDet-Ins, Apache-2.0, COCO) in YOLO26-seg layout: the 48 best anchors' masks as prototypes")
     pkgs.append(ins)
+    insq = OUT / "rtmdet-ins-m-q8_640.mlpackage"
+    if a.force or not insq.exists():
+        int8(OUT / "rtmdet-ins-m_640.mlpackage", insq)
+    pkgs.append(insq)
     for p in pkgs:
         c = compile_app(p)
         print(f"{p.stem:24s} {sum(f.stat().st_size for f in c.rglob('*') if f.is_file()) / 1e6:6.1f} MB  {c}")

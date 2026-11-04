@@ -19,22 +19,22 @@ public struct ModelSet: Sendable, Hashable, CustomStringConvertible {
     public var secondSeg: String
     /// Re-ID embedder (OSNet, 256x128).
     public var reid: String
+    /// Re-ID for plain crops (masks off): `PerceptionModels.plainReID` unless the set has its own.
+    public var plainReid: String
 
     public init(name: String, widePose: String, focusPose: String, focusSeg: String,
-                secondPose: String, secondSeg: String, reid: String) {
+                secondPose: String, secondSeg: String, reid: String, plainReid: String = PerceptionModels.plainReID) {
         self.name = name; self.widePose = widePose; self.focusPose = focusPose; self.focusSeg = focusSeg
-        self.secondPose = secondPose; self.secondSeg = secondSeg; self.reid = reid
+        self.secondPose = secondPose; self.secondSeg = secondSeg; self.reid = reid; self.plainReid = plainReid
     }
 
-    /// The small set, what an app bundles: RTMO-s pose everywhere (Apache-2.0, COCO only; tools/export_open_models.py),
-    /// RTMO-s as second chance's mask-model stand-in (box-shaped masks; function seg640 of rtmo-s_shapes, so its
-    /// weights are stored once), OSNet x0.25. Live segments 85.4% right, 2.0% someone else vs 76.2% / 0% for the
-    /// YOLO26 nano set (`yoloLite`). No focus-window mask model
-    /// ("none"): box masks would put the background into the colour profile, so masks are off and colour comes from
-    /// the keypoint regions alone.
-    public static let lite = ModelSet(name: "lite", widePose: "rtmo-s", focusPose: "rtmo-s",
-                                      focusSeg: "none", secondPose: "rtmo-s", secondSeg: "rtmo-s:seg640",
-                                      reid: "osnet_x0_25_msmt17")
+    /// The small set, what an app bundles: the default set's detection and outline models with 8-bit weights (owner,
+    /// 4 Nov: "ship the 8-bit model into the app, everything including the detection, reid … and outline models";
+    /// tools/export_open_models.py): RTMO-m pose and its box finder, RTMDet-Ins-m outlines, and the 16-bit OSNets (small
+    /// enough: 9 MB). The same settings as `mid`, which a download replaces it with on Wi-Fi.
+    public static let lite = ModelSet(name: "lite", widePose: "rtmo-m-q8", focusPose: "rtmo-m-q8",
+                                      focusSeg: "rtmdet-ins-m-q8", secondPose: "rtmo-m-q8", secondSeg: "rtmo-m-q8:seg640",
+                                      reid: "osnet_ain_x1_0_msmt17")
     /// The app default: RTMO-m pose in the wide and focus passes, RTMO-m's box finder (function seg640 of its model: no
     /// extra weights) and RTMO-s pose for second chance, RTMDet-Ins-m outlines in the focus window when masks are on
     /// (optional: an app may leave it out), OSNet-AIN re-ID. Live segments (Dual Lens) 97.4% right, 0% someone else vs
@@ -43,6 +43,10 @@ public struct ModelSet: Sendable, Hashable, CustomStringConvertible {
     public static let mid = ModelSet(name: "mid", widePose: "rtmo-m", focusPose: "rtmo-m",
                                      focusSeg: "rtmdet-ins-m", secondPose: "rtmo-s", secondSeg: "rtmo-m:seg640",
                                      reid: "osnet_ain_x1_0_msmt17")
+    /// The RTMO-s small set the 8-bit one replaced (masks off, OSNet x0.25), for comparison.
+    public static let rtmoSmall = ModelSet(name: "rtmoSmall", widePose: "rtmo-s", focusPose: "rtmo-s",
+                                           focusSeg: "none", secondPose: "rtmo-s", secondSeg: "rtmo-s:seg640",
+                                           reid: "osnet_x0_25_msmt17")
     /// The YOLO26 sets these replace (Ultralytics, AGPL-3.0 weights; tools/export_coreml.py), for comparison:
     /// yolo26n pose + seg at 640, OSNet x0.25 ...
     public static let yoloLite = ModelSet(name: "yoloLite", widePose: "yolo26n-pose", focusPose: "yolo26n-pose",
@@ -142,7 +146,7 @@ public final class PerceptionModels: @unchecked Sendable {
     init(_ set: ModelSet, computeUnits: MLComputeUnits, locate: (String) -> URL?) throws {
         self.set = set
         self.computeUnits = computeUnits
-        plainURL = locate(Self.plainReID)
+        plainURL = locate(set.plainReid)
         let config = MLModelConfiguration()
         config.computeUnits = computeUnits
         var cache: [String: MLModel] = [:]
