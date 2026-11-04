@@ -8,17 +8,23 @@ nms/batched_nms: nothing else here needs them), mmdet 3.3, mmpose 1.3.2, coremlt
 download server) in $DIRECTE_DATA/models/external/safe:
 
   rtmo-s_8xb32-600e_coco-640x640-8db55a59_20231211.pth, rtmo-m_16xb16-600e_coco-640x640-6f4e0306_20231211.pth (mmpose)
-  rtmdet_m_8xb32-300e_coco_20220719_112220-229f527c.pth (mmdet; CSPNeXt backbone ImageNet-pretrained)
+  rtmdet-ins_m_8xb32-300e_coco_20221123_001039-6eba602e.pth (mmdet RTMDet-Ins: the outline model; CSPNeXt backbone
+  ImageNet-pretrained)
 
 Writes $DIRECTE_DATA/models/coreml/open/<name>.mlpackage, compiled into models/coreml/app (next to the YOLO26 ones; the
 names differ) and models/coreml/bundle-open (ModelSet.lite, what an app bundles):
 
-  rtmo-m_shapes, rtmo-s_shapes   pose, functions s640x640 / s640x384 / s384x640 (weights stored once)
+  rtmo-m_shapes, rtmo-s_shapes   pose, functions s640x640 / s640x384 / s384x640 (weights stored once); rtmo-s_shapes
+                                 and seg640, the model's box finder (ModelSet's "rtmo-m:seg640", "rtmo-s:seg640")
       input  "image": BGR 0...255 (RTMO's own input), letterboxed grey 114
       output "detections" [1, 56, N]: cx cy w h (input pixels), person score, 17 x (x, y, visibility)
-  rtmo-s-boxseg_640, rtmdet-m-boxseg_640   the mask model's slot (second chance; masks for the small set)
+  <rtmo>:seg640 (function of <rtmo>_shapes)   the mask model's slot for second chance
       output "detections" [1, 4 + 1 + 32, N] (mask coefficients 1, 0, ...), "protos" [1, 32, 160, 160] (plane 0 ones):
       each person's mask is their box. Second chance uses the mask model only to find someone.
+  rtmdet-ins-m_640               the outline model (focus-window masks: Precise, finding far climbers)
+      output "detections" [1, 4 + 1 + 48, 48]: the 48 best anchors, each coefficient one-hot, and "protos"
+      [1, 48, 80, 80]: those anchors' own mask logits, so coefficients . prototypes is each mask exactly
+Every model carries metadata nms_iou = 0.6 (Perception's nmsIoU; YOLO26 has none and keeps 0.7).
 
 What differs from mmpose / mmdet's own pipelines, all with the same outputs where it matters:
   - YOLOX's Focus stem (four strided slices: Core ML runs them on the CPU at full resolution) is the equivalent 6x6
@@ -52,13 +58,17 @@ OUT = DATA / "models" / "coreml" / "open"
 APP = DATA / "models" / "coreml" / "app"
 BUNDLE = DATA / "models" / "coreml" / "bundle-open"
 SHAPES = [(640, 640), (640, 384), (384, 640)]
+# NMS overlap for every model here (YOLO26: 0.7). RTMO's neighbouring anchors fire together: at 0.7 one person came out
+# as two boxes in 31% of looks on a synthetic scene (YOLO26 under 1%), which the tracker reads as someone beside the
+# climber. At 0.6: Basic's live segments 74.8% -> 85.4% right, wrong person 9.3% -> 2.0%; Full unchanged.
+NMS_IOU = "0.6"
 POSE = {  # name: (mmpose config, checkpoint, box scale w, h)
     "rtmo-m": ("rtmo/coco/rtmo-m_16xb16-600e_coco-640x640.py", "rtmo-m_16xb16-600e_coco-640x640-6f4e0306_20231211.pth", (0.933, 0.965)),
     "rtmo-s": ("rtmo/coco/rtmo-s_8xb32-600e_coco-640x640.py", "rtmo-s_8xb32-600e_coco-640x640-8db55a59_20231211.pth", (1.0, 1.0)),
 }
-DET = {"rtmdet-m": ("rtmdet/rtmdet_m_8xb32-300e_coco.py", "rtmdet_m_8xb32-300e_coco_20220719_112220-229f527c.pth")}
+DET = {"rtmdet-ins-m": ("rtmdet/rtmdet-ins_m_8xb32-300e_coco.py", "rtmdet-ins_m_8xb32-300e_coco_20221123_001039-6eba602e.pth")}
 # ModelSet.lite (Sources/Perception/Models.swift) and the multifunction OSNet x0.25 the YOLO26 export bundles
-BUNDLED = ["rtmo-s_shapes", "rtmo-s-boxseg_640", "osnet_x0_25_msmt17"]
+BUNDLED = ["rtmo-s_shapes", "osnet_x0_25_msmt17"]
 
 
 def configs(pkg: str) -> Path:
@@ -175,25 +185,61 @@ class RTMOBoxSeg(nn.Module):
         return box_masks(image, self.pose(image)[:, :5])
 
 
-class RTMDetBoxSeg(nn.Module):
-    """RTMDet's person class, BGR 0...255 in (its mean/std inside)."""
+class RTMDetInsSeg(nn.Module):
+    """RTMDet-Ins (person class) in YOLO26-seg's layout, real outlines: the K best anchors' masks become K prototype
+    planes and each detection's coefficients pick its own (one-hot), so YOLO26-seg's coefficients . prototypes gives
+    each mask exactly. The dynamic convs run per instance as batched matmuls; prototypes at the mask head's stride 8.
+    detections [1, 4 + 1 + K, K], protos [1, K, H/8, W/8]."""
 
-    def __init__(self, model, hw=(640, 640)):
+    def __init__(self, model, hw=(640, 640), k=48):
         super().__init__()
         self.backbone, self.neck, self.head = neural_engine_friendly(model.backbone), model.neck, model.bbox_head
+        self.k = k
         pp = model.data_preprocessor
         self.register_buffer("mean", pp.mean.view(1, 3, 1, 1).clone())
         self.register_buffer("std", pp.std.view(1, 3, 1, 1).clone())
         strides = [s[0] for s in self.head.prior_generator.strides]
-        pri = self.head.prior_generator.grid_priors([torch.Size((hw[0] // s, hw[1] // s)) for s in strides], dtype=torch.float32, device="cpu")
-        self.register_buffer("priors", torch.cat([p[:, :2] for p in pri]))
+        pri = self.head.prior_generator.grid_priors([torch.Size((hw[0] // s, hw[1] // s)) for s in strides], dtype=torch.float32,
+                                                    device="cpu", with_stride=True)
+        self.register_buffer("priors", torch.cat(pri))                # [N, 4]: x, y, stride x, stride y
+        mh, mw = hw[0] // strides[0], hw[1] // strides[0]
+        coord = self.head.prior_generator.single_level_grid_priors((mh, mw), level_idx=0, device="cpu")
+        self.register_buffer("coord", coord.reshape(1, -1, 2))         # [1, HW, 2]
+        self.mh, self.mw = mh, mw
 
     def forward(self, image):
-        cls, dist = self.head(self.neck(self.backbone((image - self.mean) / self.std)))
-        score = flat(cls)[0, :, :1].sigmoid()
-        d = flat(dist)[0]                                     # l t r b, already times the stride
-        x0y0, x1y1 = self.priors - d[:, :2], self.priors + d[:, 2:]
-        return box_masks(image, torch.cat([(x0y0 + x1y1) / 2, x1y1 - x0y0, score], 1).t()[None])
+        h = self.head
+        cls, dist, kern, mask_feat = h(self.neck(self.backbone((image - self.mean) / self.std)))
+        score = flat(cls)[0, :, 0].sigmoid()
+        top, idx = score.topk(self.k)
+        d = flat(dist)[0][idx]
+        pri = self.priors[idx]
+        x0y0, x1y1 = pri[:, :2] - d[:, :2], pri[:, :2] + d[:, 2:]
+        kernels = flat(kern)[0][idx]                                  # [K, P]
+        # relative coordinates, as RTMDetInsHead._mask_predict_by_feat_single
+        rel = (pri[:, None, :2] - self.coord) / (pri[:, None, 2:3] * 8)  # [K, HW, 2]
+        feat = mask_feat.reshape(1, mask_feat.shape[1], -1).expand(self.k, -1, -1)  # [K, C, HW]
+        x = torch.cat([rel.permute(0, 2, 1), feat], 1)               # [K, C + 2, HW]
+        o = 0
+        ws = h.weight_nums
+        bs = h.bias_nums
+        n = len(ws)
+        ch = h.dyconv_channels
+        params_w, params_b = [], []
+        for i in range(n):
+            params_w.append(kernels[:, o:o + ws[i]]); o += ws[i]
+        for i in range(n):
+            params_b.append(kernels[:, o:o + bs[i]]); o += bs[i]
+        for i in range(n):
+            out = ch if i < n - 1 else 1
+            w = params_w[i].reshape(self.k, out, -1)                   # [K, out, in]
+            x = torch.bmm(w, x) + params_b[i].reshape(self.k, out, 1)
+            if i < n - 1:
+                x = torch.relu(x)
+        protos = x.reshape(1, self.k, self.mh, self.mw)                # mask logits per instance
+        coef = torch.eye(self.k, dtype=top.dtype)                      # [K coefficient rows, K detections]
+        det = torch.cat([((x0y0 + x1y1) / 2).t(), (x1y1 - x0y0).t(), top[None], coef], 0)[None]
+        return det, protos
 
 
 def load_pose(name):
@@ -219,22 +265,35 @@ def convert(net: nn.Module, hw, outputs: list[str], path: Path, note: str) -> Pa
                    outputs=[ct.TensorType(name=o) for o in outputs], minimum_deployment_target=ct.target.iOS17,
                    compute_precision=ct.precision.FLOAT16, convert_to="mlprogram")
     m.short_description = note
+    m.user_defined_metadata["nms_iou"] = NMS_IOU  # Perception reads it (nmsIoU)
     if path.exists():
         shutil.rmtree(path)
     m.save(str(path))
     return path
 
 
-def merge_shapes(name: str) -> Path:
+def merge_shapes(name: str, extra: dict[str, Path] | None = None) -> Path:
+    """The pose shapes as functions s<H>x<W> of one model, plus `extra` functions (its box finder, seg640)."""
     from coremltools.models.utils import MultiFunctionDescriptor, save_multifunction
     target = OUT / f"{name}_shapes.mlpackage"
     desc = MultiFunctionDescriptor()
     for h, w in SHAPES:
         desc.add_function(str(OUT / f"{name}_{h}x{w}.mlpackage"), src_function_name="main", target_function_name=f"s{h}x{w}")
+    for fn, pkg in (extra or {}).items():
+        desc.add_function(str(pkg), src_function_name="main", target_function_name=fn)
     desc.default_function_name = "s640x640"
     if target.exists():
         shutil.rmtree(target)
     save_multifunction(desc, str(target))
+    # save_multifunction drops the parts' metadata: write it into the package's spec (the weights stay where they are)
+    import json
+    info = json.loads((target / "Manifest.json").read_text())
+    spec_path = next(target / "Data" / e["path"] for e in info["itemInfoEntries"].values() if e["path"].endswith(".mlmodel"))
+    import coremltools as ct
+    spec = ct.utils.load_spec(str(target))
+    spec.description.metadata.userDefined["nms_iou"] = NMS_IOU
+    spec_path.write_bytes(spec.SerializeToString())
+    assert ct.utils.load_spec(str(target)).description.metadata.userDefined["nms_iou"] == NMS_IOU
     return target
 
 
@@ -253,6 +312,12 @@ def main():
     a = ap.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     pkgs = []
+    segs = {}
+    for name, (_, _, bs) in POSE.items():  # each RTMO's box finder, a function of its _shapes model (no extra weights)
+        segs[name] = OUT / f"{name}-boxseg_640.mlpackage"
+        if a.force or not segs[name].exists():
+            convert(RTMOBoxSeg(RTMOPose(load_pose(name), (640, 640), bs)), (640, 640), ["detections", "protos"], segs[name],
+                    f"{name} (mmpose RTMO, Apache-2.0, COCO) in YOLO26-seg layout, box-shaped masks")
     for name, (_, _, bs) in POSE.items():
         target = OUT / f"{name}_shapes.mlpackage"
         if a.force or not target.exists():
@@ -260,18 +325,13 @@ def main():
             for hw in SHAPES:
                 convert(RTMOPose(copy.deepcopy(model), hw, bs), hw, ["detections"], OUT / f"{name}_{hw[0]}x{hw[1]}.mlpackage",
                         f"{name} (mmpose RTMO, Apache-2.0, COCO) in YOLO26-pose layout, {hw[0]}x{hw[1]}")
-            merge_shapes(name)
+            merge_shapes(name, {"seg640": segs[name]})
         pkgs.append(target)
-    seg = OUT / "rtmo-s-boxseg_640.mlpackage"
-    if a.force or not seg.exists():
-        convert(RTMOBoxSeg(RTMOPose(load_pose("rtmo-s"), (640, 640), POSE["rtmo-s"][2])), (640, 640), ["detections", "protos"], seg,
-                "rtmo-s (mmpose RTMO, Apache-2.0, COCO) in YOLO26-seg layout, box-shaped masks")
-    pkgs.append(seg)
-    det = OUT / "rtmdet-m-boxseg_640.mlpackage"
-    if a.force or not det.exists():
-        convert(RTMDetBoxSeg(load_det("rtmdet-m")), (640, 640), ["detections", "protos"], det,
-                "rtmdet-m (mmdet RTMDet, Apache-2.0, COCO) in YOLO26-seg layout, box-shaped masks, person only")
-    pkgs.append(det)
+    ins = OUT / "rtmdet-ins-m_640.mlpackage"
+    if a.force or not ins.exists():
+        convert(RTMDetInsSeg(load_det("rtmdet-ins-m")), (640, 640), ["detections", "protos"], ins,
+                "rtmdet-ins-m (mmdet RTMDet-Ins, Apache-2.0, COCO) in YOLO26-seg layout: the 48 best anchors' masks as prototypes")
+    pkgs.append(ins)
     for p in pkgs:
         c = compile_app(p)
         print(f"{p.stem:24s} {sum(f.stat().st_size for f in c.rglob('*') if f.is_file()) / 1e6:6.1f} MB  {c}")

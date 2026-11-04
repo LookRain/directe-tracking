@@ -5,7 +5,8 @@ import Foundation
 /// named `<stem>_640.mlmodelc` (640x640 input), `<stem>_640x384.mlmodelc` / `<stem>_384x640.mlmodelc`
 /// (H x W, the wide pass on 16:9 portrait / landscape frames, optional) and `<reid>.mlmodelc`
 /// (tools/export_coreml.py). A pose model's shapes can instead be one multifunction model,
-/// `<stem>_shapes.mlmodelc` (functions `s<H>x<W>`, the weights stored once), which is preferred.
+/// `<stem>_shapes.mlmodelc` (functions `s<H>x<W>`, the weights stored once), which is preferred. A mask model named
+/// `<stem>:<function>` is that function of `<stem>_shapes.mlmodelc`.
 public struct ModelSet: Sendable, Hashable, CustomStringConvertible {
     public var name: String
     /// Wide pass: the whole frame letterboxed to 640 (rectangular input when the model exists).
@@ -26,18 +27,21 @@ public struct ModelSet: Sendable, Hashable, CustomStringConvertible {
     }
 
     /// The small set, what an app bundles: RTMO-s pose everywhere (Apache-2.0, COCO only; tools/export_open_models.py),
-    /// RTMO-s as second chance's mask-model stand-in (box-shaped masks), OSNet x0.25. No focus-window mask model
+    /// RTMO-s as second chance's mask-model stand-in (box-shaped masks; function seg640 of rtmo-s_shapes, so its
+    /// weights are stored once), OSNet x0.25. Live segments 85.4% right, 2.0% someone else vs 76.2% / 0% for the
+    /// YOLO26 nano set (`yoloLite`). No focus-window mask model
     /// ("none"): box masks would put the background into the colour profile, so masks are off and colour comes from
     /// the keypoint regions alone.
     public static let lite = ModelSet(name: "lite", widePose: "rtmo-s", focusPose: "rtmo-s",
-                                      focusSeg: "none", secondPose: "rtmo-s", secondSeg: "rtmo-s-boxseg",
+                                      focusSeg: "none", secondPose: "rtmo-s", secondSeg: "rtmo-s:seg640",
                                       reid: "osnet_x0_25_msmt17")
-    /// The app default: RTMO-m pose in the wide and focus passes, RTMO-s for second chance with RTMDet-m finding people
-    /// in the mask model's slot (box-shaped masks; no mask model for the focus window yet, so masks are off), OSNet-AIN
-    /// re-ID. Live segments 99.3% right, 0% someone else (YOLO26 `yoloMid`: 93.4%, 0.7%); RTMO-m runs 6.9 ms at
-    /// 640 x 640 on the Neural Engine vs 10.9 for yolo26m-pose (docs/review/deep-dives/safe-models.md in the app repo).
+    /// The app default: RTMO-m pose in the wide and focus passes, RTMO-m's box finder (function seg640 of its model: no
+    /// extra weights) and RTMO-s pose for second chance, RTMDet-Ins-m outlines in the focus window when masks are on
+    /// (optional: an app may leave it out), OSNet-AIN re-ID. Live segments (Dual Lens) 97.4% right, 0% someone else vs
+    /// 93.4% / 0.7% for the YOLO26 set (`yoloMid`); lock-on bench 84.8% vs 84.2%. RTMO-m runs 6.9 ms at 640 x 640 on
+    /// the Neural Engine vs 10.9 for yolo26m-pose (docs/review/deep-dives/safe-models.md in the app repo).
     public static let mid = ModelSet(name: "mid", widePose: "rtmo-m", focusPose: "rtmo-m",
-                                     focusSeg: "rtmdet-ins-m", secondPose: "rtmo-s", secondSeg: "rtmdet-m-boxseg",
+                                     focusSeg: "rtmdet-ins-m", secondPose: "rtmo-s", secondSeg: "rtmo-m:seg640",
                                      reid: "osnet_ain_x1_0_msmt17")
     /// The YOLO26 sets these replace (Ultralytics, AGPL-3.0 weights; tools/export_coreml.py), for comparison:
     /// yolo26n pose + seg at 640, OSNet x0.25 ...
@@ -185,8 +189,25 @@ public final class PerceptionModels: @unchecked Sendable {
         wideURLs = urls
         focusPose = try pose(set.focusPose, rect: false)
         secondPose = try pose(set.secondPose, rect: false)
-        focusSeg = try load("\(set.focusSeg)_640", required: false).map { SegNet(model: $0) }
-        secondSeg = SegNet(model: try load("\(set.secondSeg)_640")!)
+        // a mask model is `<stem>_640`, or `<stem>:<function>`: that function of the `<stem>_shapes` model (RTMO-s's box
+        // finder shares its pose model's weights: one file in the bundle)
+        func seg(_ name: String, required: Bool) throws -> SegNet? {
+            let parts = name.split(separator: ":").map(String.init)
+            guard parts.count == 2 else { return try load("\(name)_640", required: required).map { SegNet(model: $0) } }
+            let key = "\(parts[0])_shapes/\(parts[1])"
+            if cache[key] == nil {
+                guard let url = locate("\(parts[0])_shapes") else {
+                    if required { throw PerceptionError.modelMissing(name) }
+                    return nil
+                }
+                let c = config.copy() as! MLModelConfiguration
+                c.functionName = parts[1]
+                cache[key] = try MLModel(contentsOf: url, configuration: c)
+            }
+            return SegNet(model: cache[key]!)
+        }
+        focusSeg = try seg(set.focusSeg, required: false)
+        secondSeg = try seg(set.secondSeg, required: true)!
         // The re-ID net gives all-zero embeddings on the iOS Simulator's GPU (and the tracker then never locks): if
         // it doesn't answer sensibly where it was put, run it on the CPU.
         var reidModel = try load(set.reid)!

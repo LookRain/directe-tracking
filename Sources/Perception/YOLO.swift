@@ -172,6 +172,19 @@ func nonMaxSuppression(_ p: UnsafeBufferPointer<Float>, channels: Int, anchors n
     return keep
 }
 
+/// The NMS overlap a model asks for in its metadata ("nms_iou"; tools/export_open_models.py writes 0.5 for RTMO, whose
+/// neighbouring anchors fire at once: at Ultralytics' 0.7 one person often came out as two boxes), nil if it doesn't say.
+func nmsIoU(_ model: MLModel) -> Float? {
+    if let v = ProcessInfo.processInfo.environment["DIRECTE_NMS_IOU"].flatMap(Float.init) { return v }  // benches
+    return metadata(model, "nms_iou")
+}
+
+/// A number from the model's metadata (tools/export_open_models.py: "nms_iou", "pose_conf").
+func metadata(_ model: MLModel, _ key: String) -> Float? {
+    let meta = model.modelDescription.metadata[.creatorDefinedKey] as? [String: String]
+    return meta?[key].flatMap(Float.init)
+}
+
 private func predict(_ model: MLModel, _ pb: CVPixelBuffer) throws -> MLFeatureProvider {
     try model.prediction(from: MLDictionaryFeatureProvider(dictionary: ["image": MLFeatureValue(pixelBuffer: pb)]))
 }
@@ -194,8 +207,15 @@ struct Canvas {
 final class PoseNet {
     let models: [SIMD2<Int>: MLModel]   // (H, W) -> model
     var conf: Float = 0.25               // lab Detector default
+    /// NMS overlap: the model's own (`nmsIoU`), else Ultralytics' 0.7.
+    let iou: Float
 
-    init(models: [SIMD2<Int>: MLModel]) { self.models = models }
+    init(models: [SIMD2<Int>: MLModel]) {
+        self.models = models
+        iou = models.values.first.flatMap(nmsIoU) ?? 0.7
+        if let v = models.values.first.flatMap({ metadata($0, "pose_conf") }) { conf = v }  // the model's own threshold
+        if let v = ProcessInfo.processInfo.environment["DIRECTE_POSE_CONF"].flatMap(Float.init) { conf = v }  // benches
+    }
 
     /// Detector()(src): pose on the whole of `src` at imgsz 640 (rect letterbox).
     func detect(_ src: PixelView, pool: BufferPool) throws -> [PoseDet] {
@@ -229,7 +249,7 @@ final class PoseNet {
         let nk = (ch - 5) / 3
         return withDenseFloats(out) { p in
             var dets: [PoseDet] = []
-            for d in nonMaxSuppression(p, channels: ch, anchors: n, nc: 1, conf: conf) {
+            for d in nonMaxSuppression(p, channels: ch, anchors: n, nc: 1, conf: conf, iou: iou) {
                 let b = d.box
                 let box = sb.box(SIMD4(b[0] - fx, b[1] - fy, b[2] - fx, b[3] - fy))
                 var k: [Keypoint] = []
@@ -249,8 +269,12 @@ final class PoseNet {
 final class SegNet {
     let model: MLModel
     var conf: Float = 0.2                // lab Segmenter
+    let iou: Float
 
-    init(model: MLModel) { self.model = model }
+    init(model: MLModel) {
+        self.model = model
+        iou = nmsIoU(model) ?? 0.7
+    }
 
     /// Segmenter()(src): person boxes and mask outlines (retina_masks=False).
     func detect(_ src: PixelView, pool: BufferPool) throws -> [SegDet] {
@@ -270,7 +294,7 @@ final class SegNet {
         let nc = ch - 4 - nm
         let sb = ScaleBack(img1W: lb.canvasW, img1H: lb.canvasH, img0W: c.srcW, img0H: c.srcH)
         let (kept, coeffs) = withDenseFloats(det) { p -> ([RawDet], [[Float]]) in
-            let kept = nonMaxSuppression(p, channels: ch, anchors: n, nc: nc, conf: conf)
+            let kept = nonMaxSuppression(p, channels: ch, anchors: n, nc: nc, conf: conf, iou: iou)
             return (kept, kept.map { d in (0..<nm).map { p[(4 + nc + $0) * n + d.anchor] } })
         }
         if kept.isEmpty { return [] }
