@@ -116,6 +116,19 @@ public struct TrackerConfig: Codable, Sendable, Equatable {
     public var ownAloneS = 1.0
     public var ownGap = 0.5           // body heights
     public var ownMotion = 0.6
+    // Everyone else's short position track (TargetTracker `Bystanders`): on confident frames everyone apart from the
+    // climber earns "not her" by the second; anyone who is one of those tracks carrying on with `bystanderS` of it is
+    // ruled out, whatever they look like. A track loses it near the climber's place (`bystanderNear` body heights of the
+    // lock or the prediction) unless the lock is seen and they barely touch (then it's only set aside), crossing someone who
+    // hasn't earned it (IoU `bystanderCross`), or picked up again after `bystanderGapS` unseen.
+    public var bystanders = false
+    public var bystanderS = 1.0
+    public var bystanderKeepS = 2.0     // a track unseen this long ends
+    public var bystanderIoU = 0.2       // a person takes over a track overlapping where it was heading by more than this
+    public var bystanderNear = 0.0
+    public var bystanderCross = 0.3     // boxes overlapping this much (IoU) are a crossing: the label goes
+    public var bystanderGapS = 0.5
+    public var bystanderMatch = true    // ...also while locked or uncertain (false: only while lost)
 
     public init() {}
 
@@ -166,6 +179,9 @@ public struct TrackerConfig: Codable, Sendable, Equatable {
         try v(.galleryAdmit, &galleryAdmit); try v(.galleryNew, &galleryNew); try v(.negDedupe, &negDedupe)
         try v(.oneToOne, &oneToOne); try v(.keepApart, &keepApart)
         try v(.ownKeep, &ownKeep); try v(.ownAloneS, &ownAloneS); try v(.ownGap, &ownGap); try v(.ownMotion, &ownMotion)
+        try v(.bystanders, &bystanders); try v(.bystanderS, &bystanderS); try v(.bystanderKeepS, &bystanderKeepS)
+        try v(.bystanderIoU, &bystanderIoU); try v(.bystanderNear, &bystanderNear); try v(.bystanderCross, &bystanderCross); try v(.bystanderGapS, &bystanderGapS)
+        try v(.bystanderMatch, &bystanderMatch)
     }
 
     /// The re-ID calibration for another embedder: `reidLo`/`reidHi` set to `lo`/`hi`, and the constants in cosine

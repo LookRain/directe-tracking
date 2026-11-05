@@ -226,7 +226,7 @@ func goldenReplay(name: String, configName: String) throws {
     enc.keyEncodingStrategy = .convertToSnakeCase
     let ours = try JSONSerialization.jsonObject(with: enc.encode(TrackerConfig())) as! [String: Any]
     // Swift-only: directe_tracking/tracker.py's literals (0.1, 0.9, 0.92), fields so `recalibrate` moves them with reid_lo/hi
-    let swiftOnly: Set = ["gallery_admit", "gallery_new", "neg_dedupe", "reacquire_window", "reacquire_near", "min_update_dt", "still_uncertain_s", "still_small_below", "doubt_reach"]  // the live tracker's, off in jobs; doubt_reach is set by the app's jobs (Pipeline JobOptions.doubtReach)
+    let swiftOnly: Set = ["gallery_admit", "gallery_new", "neg_dedupe", "reacquire_window", "reacquire_near", "min_update_dt", "still_uncertain_s", "still_small_below", "doubt_reach", "bystanders", "bystander_s", "bystander_keep_s", "bystander_io_u", "bystander_near", "bystander_cross", "bystander_gap_s", "bystander_match"]  // the live tracker's, off in jobs; doubt_reach is set by the app's jobs (Pipeline JobOptions.doubtReach)
     #expect(Set(ours.keys).subtracting(swiftOnly) == Set(lab.keys))
     #expect(g.config("default") == TrackerConfig())
     #expect(g.config("combo") == TrackerConfig.combo)

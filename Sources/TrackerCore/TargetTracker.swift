@@ -97,6 +97,9 @@ public final class TargetTracker {
     var upT = -1e9
     var jumpedSinceUp = false
     var prev: (state: TrackState, box: Box)?
+    var bystanders = Bystanders()
+    /// Per view candidate of the last step: ruled out as one of the other people carrying on (TrackerConfig.bystanders).
+    private(set) var bystanderRuled: [Bool] = []
 
     /// Last frame's boxes (as the lab's `_tracks`): age (s), whether that track is the target, and how long it
     /// was seen beside the locked climber (s; the lab's `_beside`).
@@ -169,6 +172,7 @@ public final class TargetTracker {
             ground += shift.y  // the ground line moves with the wall
             groundTag += shift.y
         }
+        if config.bystanders { bystanders.camera(shift) }
         for i in people.indices {
             people[i].box = people[i].box.offset(shift)
             people[i].box0 = people[i].box0.offset(shift)
@@ -229,7 +233,13 @@ public final class TargetTracker {
     func step(_ t: Double, _ view: Cands, _ spotter: Cands? = nil) -> Step {
         if tiein || (config.groundLatch && t - tTag <= 3.0) { observe(t, view) }
         let prevState = state
+        let prevT = self.t
+        if config.bystanders {
+            bystanders.associate(t, view.boxes, config)
+            bystanderRuled = bystanders.ruled(config)
+        }
         let s = innerStep(t, view, spotter)
+        if config.bystanders { learnBystanders(t, t - prevT, s, prevState, view) }
         if config.negatives || config.transact { learnPeople(t, s, prevState, view) }
         latch(s.state)
         if tiein { tieIn(t, view, s) }
@@ -277,6 +287,15 @@ public final class TargetTracker {
         profile.lastNegT = t
     }
 
+    /// After a step: everyone apart from a confident lock earns "not her" (see `Bystanders`).
+    func learnBystanders(_ t: Double, _ dt: Double, _ s: Step, _ prevState: TrackState, _ view: Cands) {
+        let cfg = config
+        let k = s.state == .locked && s.chosen >= 0 && s.chosen < view.count ? s.chosen : -1
+        let doubt = unstable || jumpT == t || (k >= 0 && prevState == .lost) || (rivalGap.map { $0 < cfg.doubtRival } ?? false)
+        let confident = k >= 0 && !doubt && s.app >= cfg.adaptApp && ownHeld >= cfg.settleS && steady()
+        bystanders.after(near: k >= 0 ? view.boxes[k] : predictedBox(), observed: k >= 0, chosen: k, confident: confident, dt: dt, cfg)
+    }
+
     func innerStep(_ t: Double, _ view: Cands, _ spotter: Cands?) -> Step {
         let dt = max(t - self.t, 1e-3)
         if shiftUnknown && config.jumpGuard, let T = commonShift(view) {
@@ -293,6 +312,7 @@ public final class TargetTracker {
         let hasSpotter = (spotter?.count ?? 0) > 0
 
         if state == .lost {
+            if hasSpotter { bystanderRuled = [] }  // they're the view's people
             let cc = hasSpotter ? spotter! : view
             if cc.count == 0 || !allowReacquire || unstable {
                 carry(cc, dt, -1)
@@ -510,6 +530,7 @@ public final class TargetTracker {
         }
         let vetoes = vetoed(n)
         var bad = implausible(cc, hs, hRef, hRefWeak).enumerated().map { $1 || vetoes[$0] }
+        if cfg.bystanderMatch { for i in 0..<min(n, bystanderRuled.count) where bystanderRuled[i] { bad[i] = true } }
         if cfg.jumpGuard {
             var jump = jumps(pred, since, dt, cc, cents, hRef)
             let ok = (0..<n).map { known[$0] && (app.ge($0, floor) || own[$0]) && motion[$0] >= 0.05 && !bad[$0] }
@@ -592,10 +613,12 @@ public final class TargetTracker {
         tracks.isT = tg
         kept.isT = [Bool](repeating: false, count: kept.boxes.count)
         ownHeld = 0
+        bystanders.forget()
     }
 
     /// Referee: whoever we're locked onto is not the climber. Drop the lock.
     public func release(t: Double) {
+        bystanders.forget()
         state = .lost
         tSeen = t - 1e3
         reacq = nil
@@ -779,6 +802,7 @@ public final class TargetTracker {
         let bad = implausible(cc, hs, nil, false)
         let vet = vetoed(cc.count)
         for i in 0..<cc.count where bad[i] || vet[i] { app.v[i] = -1.0 }
+        for i in 0..<min(cc.count, bystanderRuled.count) where bystanderRuled[i] { app.v[i] = -1.0 }  // someone else carrying on
         if config.keepApart {  // seen beside the locked climber: someone else
             let beside = trackInfo(cc).beside
             for i in 0..<cc.count where beside[i] >= config.settleS { app.v[i] = -1.0 }
