@@ -52,7 +52,7 @@ from pathlib import Path
 import torch
 from torch import nn
 
-DATA = Path(os.environ.get("DIRECTE_DATA", "/Volumes/ROCKET-XTRM/Offload/climb-cam"))
+DATA = Path(os.environ.get("DIRECTE_DATA", "data"))  # as directe_tracking/clips.py
 W = DATA / "models" / "external" / "safe"
 OUT = DATA / "models" / "coreml" / "open"
 APP = DATA / "models" / "coreml" / "app"
