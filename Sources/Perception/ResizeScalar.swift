@@ -2,7 +2,7 @@ import Foundation
 
 // The single-threaded scalar cv2.resize port as it was before the SIMD / multi-core one in Resize.swift (23 Oct 2026),
 // for A/B tests on the phone (JobOptions.multicorePixels = false). Same bytes out; INTER_AREA for non-integer
-// downscales is shared (Resize.swift `resizeArea`, which didn't change).
+// downscales is shared (Resize.swift `resizeArea`, one band with multicore off).
 
 /// The original single-threaded scalar port of cv2.resize (same output as `cvResize`, byte for byte), kept so
 /// `PixelWork.multicore = false` can compare against it.

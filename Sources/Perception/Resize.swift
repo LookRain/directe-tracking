@@ -210,43 +210,51 @@ private func areaTab(_ ssize: Int, _ dsize: Int, _ scale: Double) -> [AreaTap] {
     return tab
 }
 
-/// INTER_AREA for non-integer downscales (ResizeArea_Invoker, float accumulation in OpenCV's order).
+/// INTER_AREA for non-integer downscales (ResizeArea_Invoker, float accumulation in OpenCV's order), in row bands on
+/// several cores (`PixelWork.multicore`): each output row sums its own source rows in the same order as one pass over them would (a source row
+/// on a band's edge is read by both bands), so the result is the same to the bit. Single-threaded, a 12-megapixel
+/// frame shrunk to the wall-motion map's 270 x 480 took 35 ms on an iPhone, more than all the models of a tick.
 func resizeArea(_ src: PixelView, _ dst: PixelView, _ scaleX: Double, _ scaleY: Double) {
     let xtab = areaTab(src.width, dst.width, scaleX), ytab = areaTab(src.height, dst.height, scaleY)
+    // each output row's taps: ytab[rows[dy]..<rows[dy + 1]] (the taps come in output-row order)
+    var rows = [Int](repeating: ytab.count, count: dst.height + 1)
+    for (i, t) in ytab.enumerated().reversed() { rows[t.di] = i }
+    for dy in stride(from: dst.height - 1, through: 0, by: -1) where rows[dy] > rows[dy + 1] { rows[dy] = rows[dy + 1] }
     let w3 = dst.width * 3
-    let buf = UnsafeMutablePointer<Float>.allocate(capacity: w3), sum = UnsafeMutablePointer<Float>.allocate(capacity: w3)
-    defer { buf.deallocate(); sum.deallocate() }
-    sum.initialize(repeating: 0, count: w3)
-    var prevDy = ytab.first?.di ?? 0
-
-    func emit(_ dy: Int) {
-        let d = dst.row(dy)
-        for x in 0..<dst.width {
-            for c in 0..<3 { d[4 * x + c] = UInt8(clamping: Int(sum[3 * x + c].rounded(.toNearestOrEven))) }
-            d[4 * x + 3] = 255
-        }
-    }
-
     xtab.withUnsafeBufferPointer { xt in
-        for t in ytab {
-            let s = src.row(t.si)
-            buf.initialize(repeating: 0, count: w3)
-            for k in xt {
-                let sp = s + 4 * k.si, dp = buf + 3 * k.di
-                dp[0] += Float(sp[0]) * k.alpha
-                dp[1] += Float(sp[1]) * k.alpha
-                dp[2] += Float(sp[2]) * k.alpha
+        ytab.withUnsafeBufferPointer { yt in
+            let band = { (lo: Int, hi: Int) in
+                let buf = UnsafeMutablePointer<Float>.allocate(capacity: w3), sum = UnsafeMutablePointer<Float>.allocate(capacity: w3)
+                defer { buf.deallocate(); sum.deallocate() }
+                for dy in lo..<hi {
+                    sum.initialize(repeating: 0, count: w3)
+                    for i in rows[dy]..<rows[dy + 1] {
+                        let t = yt[i]
+                        let s = src.row(t.si)
+                        buf.initialize(repeating: 0, count: w3)
+                        for k in xt {
+                            let sp = s + 4 * k.si, dp = buf + 3 * k.di
+                            dp[0] += Float(sp[0]) * k.alpha
+                            dp[1] += Float(sp[1]) * k.alpha
+                            dp[2] += Float(sp[2]) * k.alpha
+                        }
+                        if i == rows[dy] {
+                            for e in 0..<w3 { sum[e] = t.alpha * buf[e] }
+                        } else {
+                            for e in 0..<w3 { sum[e] += t.alpha * buf[e] }
+                        }
+                    }
+                    let d = dst.row(dy)
+                    for x in 0..<dst.width {
+                        for c in 0..<3 { d[4 * x + c] = UInt8(clamping: Int(sum[3 * x + c].rounded(.toNearestOrEven))) }
+                        d[4 * x + 3] = 255
+                    }
+                }
             }
-            if t.di != prevDy {
-                emit(prevDy)
-                for e in 0..<w3 { sum[e] = t.alpha * buf[e] }
-                prevDy = t.di
-            } else {
-                for e in 0..<w3 { sum[e] += t.alpha * buf[e] }
-            }
+            // PixelWork.multicore off (the scalar code path): one band, as before
+            if PixelWork.multicore { forBands(dst.height, pixels: src.width * src.height, band) } else { band(0, dst.height) }
         }
     }
-    emit(prevDy)
 }
 
 /// cv2.cvtColor(BGR2GRAY) for 8-bit: (1868 B + 9617 G + 4899 R + 2^13) >> 14.

@@ -141,3 +141,36 @@ import Testing
         #expect(found.count == 2 && found[1].poly == poly)
     }
 }
+
+/// INTER_AREA at non-integer factors runs in row bands: the same bytes as one band (`PixelWork.multicore` off), for the
+/// sizes the tracker meets (720p and 4:3 12 MP frames into the wall-motion map, odd crops into a canvas).
+@Suite(.serialized) struct AreaResizeBands {
+    @Test(arguments: [(720, 1280, 270, 480), (1440, 2560, 270, 480), (3024, 4032, 270, 480), (517, 301, 203, 97)])
+    func bandsMatchOneBand(sw: Int, sh: Int, w: Int, h: Int) {
+        let src = BGRAImage(width: sw, height: sh)
+        var seed: UInt64 = 0x9E37_79B9_7F4A_7C15
+        for y in 0..<sh {
+            let r = src.view.row(y)
+            for x in 0..<(4 * sw) {
+                seed = seed &* 6364136223846793005 &+ 1442695040888963407
+                r[x] = UInt8(truncatingIfNeeded: seed >> 56)
+            }
+        }
+        let banded = BGRAImage(width: w, height: h), single = BGRAImage(width: w, height: h)
+        let t0 = Date()
+        cvResize(src.view, banded.view, .area)
+        let t1 = Date()
+        let was = PixelWork.multicore
+        PixelWork.multicore = false
+        cvResize(src.view, single.view, .area)
+        PixelWork.multicore = was
+        print(String(format: "AREA %ldx%ld -> %ldx%ld: bands %.1f ms, one band %.1f ms", sw, sh, w, h,
+                     1000 * t1.timeIntervalSince(t0), 1000 * Date().timeIntervalSince(t1)))
+        var differ = 0
+        for y in 0..<h {
+            let a = banded.view.row(y), b = single.view.row(y)
+            for x in 0..<(4 * w) where a[x] != b[x] { differ += 1 }
+        }
+        #expect(differ == 0)
+    }
+}
