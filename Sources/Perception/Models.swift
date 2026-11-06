@@ -120,7 +120,10 @@ public final class PerceptionModels: @unchecked Sendable {
     /// The whole-frame pose model's files (and function, for a multifunction model), for a second copy on the GPU
     /// (`gpuWidePose`).
     private let wideURLs: [SIMD2<Int>: (url: URL, function: String?)]
-    /// The re-ID net for plain crops (`plainEmbedder`), loaded on first use.
+    /// The re-ID net for plain crops (`plainEmbedder`), loaded with the others: loaded on first use (inside a job, as
+    /// it was up to build 127), it once ran at CPU speed for a whole job right after an app update (50 ms a call
+    /// instead of 3.7, report nx7b9rwvvmjsyxmy582dgt6zjn8hpcqk) while everything the loader had loaded ran on the Neural
+    /// Engine.
     private let plainURL: URL?
     private let computeUnits: MLComputeUnits
     private var plain: Embedder?
@@ -251,6 +254,19 @@ public final class PerceptionModels: @unchecked Sendable {
             reidModel = try MLModel(contentsOf: url, configuration: cpu)
         }
         reid = Embedder(model: reidModel)
+        if let url = plainURL {
+            do {
+                var m = try open(url, config, set.plainReid)
+                if computeUnits != .cpuOnly, !Embedder.works(m) {  // the Simulator's GPU, as for the main re-ID net
+                    let cpu = MLModelConfiguration()
+                    cpu.computeUnits = .cpuOnly
+                    m = try MLModel(contentsOf: url, configuration: cpu)
+                }
+                plain = Embedder(model: m)
+            } catch {
+                plainFailed = true
+            }
+        }
         Self.loadLog?("models \(set.name) (\(place)): all loaded")
     }
 }
@@ -286,6 +302,49 @@ extension PerceptionModels {
             return plain
         }
     }
+    /// Each model's own time for one prediction (ms, the best of `repeats` after a first one; no pixel work around it):
+    /// "wide pose" (640 x 384), "focus pose" (640 x 640), "second seg", "re-id" and "plain re-id" (3 crops each). An app
+    /// checks these after loading: a model iOS put on the CPU instead of the Neural Engine takes several times its usual
+    /// time (an iPhone 17 Pro there: pose 6-8 ms, mask 8-10, re-ID 2-4; on the CPU re-ID took 45-50).
+    public func speeds(repeats: Int = 3) throws -> [String: Double] {
+        let pool = BufferPool()
+        func image(_ w: Int, _ h: Int) throws -> MLFeatureProvider {
+            let pb = try pool.make(width: w, height: h)
+            try withPixels(pb, readOnly: false) { v in
+                for y in 0..<v.height {
+                    let r = v.row(y)
+                    for x in 0..<(4 * v.width) { r[x] = UInt8(truncatingIfNeeded: x &* 31 &+ y &* 17) }
+                }
+            }
+            return try MLDictionaryFeatureProvider(dictionary: ["image": MLFeatureValue(pixelBuffer: pb)])
+        }
+        func time(_ body: () throws -> Void) throws -> Double {
+            try body()
+            var best = Double.infinity
+            for _ in 0..<max(repeats, 1) {
+                let t0 = DispatchTime.now().uptimeNanoseconds
+                try body()
+                best = min(best, Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e6)
+            }
+            return best
+        }
+        var out: [String: Double] = [:]
+        let square = try image(640, 640)
+        if let (shape, m) = widePose.models.first(where: { $0.key != SIMD2(640, 640) }) ?? widePose.models.first {
+            let input = shape == SIMD2(640, 640) ? square : try image(shape.y, shape.x)
+            out["wide pose"] = try time { _ = try m.prediction(from: input) }
+        }
+        if let m = focusPose.models[SIMD2(640, 640)] { out["focus pose"] = try time { _ = try m.prediction(from: square) } }
+        out["second seg"] = try time { _ = try secondSeg.model.prediction(from: square) }
+        func embedder(_ e: Embedder) throws -> Double {
+            let batch = MLArrayBatchProvider(array: try (0..<3).map { _ in try image(e.inputW, e.inputH) })
+            return try time { _ = try e.model.predictions(from: batch, options: MLPredictionOptions()) }
+        }
+        out["re-id"] = try embedder(reid)
+        if let p = plainEmbedder() { out["plain re-id"] = try embedder(p) }
+        return out
+    }
+
     /// The whole-frame pose model loaded a second time for the GPU (`.cpuAndGPU`), loaded on first use (a second or so,
     /// more the first time on a phone). Nil in the Simulator, or if it didn't load (then it isn't tried again). Call it
     /// only in the foreground: loading prepares GPU work too.
